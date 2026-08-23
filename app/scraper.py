@@ -8,7 +8,19 @@ import math
 import urllib.parse
 from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
-from playwright_stealth import stealth_async
+
+try:
+    from playwright_stealth import Stealth
+    async def apply_stealth(page):
+        await Stealth().apply_stealth_async(page)
+except Exception:
+    try:
+        from playwright_stealth import stealth_async
+        async def apply_stealth(page):
+            await stealth_async(page)
+    except Exception:
+        async def apply_stealth(page):
+            pass
 
 from app import database
 from app import ai_evaluator
@@ -57,12 +69,10 @@ async def natural_mouse_move_and_drag(page: Page, start_x: float, start_y: float
     steps = random.randint(25, 38)
     for i in range(1, steps + 1):
         t = i / steps
-        # Ease-in-out curve
         ease = 0.5 * (1 - math.cos(t * math.pi))
         curr_x = start_x + (end_x - start_x) * ease + random.uniform(-1.5, 1.5)
         curr_y = start_y + (end_y - start_y) * ease + random.uniform(-2.0, 2.0)
         await page.mouse.move(curr_x, curr_y)
-        # Variable speed: slower at start and end
         speed_delay = 0.008 + (1 - math.sin(t * math.pi)) * 0.015
         await asyncio.sleep(speed_delay)
 
@@ -95,7 +105,7 @@ async def attempt_automated_slider_solve(page: Page) -> bool:
 
         slider_el = None
         for sel in slider_selectors:
-            el = await page.$(sel)
+            el = await page.query_selector(sel)
             if el and await el.is_visible():
                 slider_el = el
                 break
@@ -104,7 +114,7 @@ async def attempt_automated_slider_solve(page: Page) -> bool:
             # Check frames
             for frame in page.frames:
                 for sel in slider_selectors:
-                    el = await frame.$(sel)
+                    el = await frame.query_selector(sel)
                     if el and await el.is_visible():
                         slider_el = el
                         break
@@ -136,7 +146,7 @@ async def attempt_automated_slider_solve(page: Page) -> bool:
             return True
 
         # Check if error message appeared
-        error_el = await page.$(".nc-lang-cnt, #nc_1__scale_text")
+        error_el = await page.query_selector(".nc-lang-cnt, #nc_1__scale_text")
         if error_el:
             txt = (await error_el.text_content() or "").lower()
             if "pass" in txt or "success" in txt:
@@ -277,7 +287,7 @@ async def run_scraper_job(
             ])
 
             page: Page = await context.new_page()
-            await stealth_async(page)
+            await apply_stealth(page)
             session.active_page = page
 
             discovered_items: Dict[str, Dict[str, Any]] = {}
@@ -300,7 +310,8 @@ async def run_scraper_job(
                     logger.warning(f"Timeout loading search url '{search_url}': {e}")
 
                 # Check for verification challenge
-                if "punish" in page.url or await page.$("#nc_1_n1z, .btn_slide"):
+                is_punish = "punish" in page.url or (await page.query_selector("#nc_1_n1z, .btn_slide") is not None)
+                if is_punish:
                     logger.info("Verification challenge triggered! Executing automated solver first...")
                     
                     # 1. Attempt automated solver
@@ -345,10 +356,8 @@ async def run_scraper_job(
                                 session.resume_action = "continue_remaining"
 
                             if session.resume_action == "retry":
-                                # Don't increment query_index, re-try this query
                                 continue
                             else:
-                                # Continue with remaining terms (skip current query)
                                 query_index += 1
                                 continue
                         else:
@@ -360,7 +369,7 @@ async def run_scraper_job(
                     await asyncio.sleep(random.uniform(0.6, 1.2))
 
                 # Extract product links and card information
-                cards = await page.$$("a[href*='/item/']")
+                cards = await page.query_selector_all("a[href*='/item/']")
                 logger.info(f"Found {len(cards)} item anchor tags on page for '{query}'.")
 
                 for card in cards:
@@ -379,12 +388,11 @@ async def run_scraper_job(
                         clean_url = f"https://www.aliexpress.com/item/{item_id}.html"
                         card_text = (await card.text_content() or "").strip()
                         
-                        img_el = await card.$("img")
+                        img_el = await card.query_selector("img")
                         img_src = await img_el.get_attribute("src") if img_el else None
                         if img_src and img_src.startswith("//"):
                             img_src = "https:" + img_src
 
-                        # Approximate title and price from card text
                         lines = [line.strip() for line in card_text.split("\n") if line.strip()]
                         title_candidate = lines[0] if lines else f"AliExpress Product #{item_id}"
                         price_candidate = "N/A"
@@ -433,7 +441,6 @@ async def run_scraper_job(
                 session.stage = f"Evaluating product {i + 1}/{len(candidate_list)}: {cand['title'][:40]}..."
                 session.progress_pct = 45 + int(((i + 1) / max(len(candidate_list), 1)) * 50)
 
-                # Fetch detailed product specifications and features
                 specs = []
                 body_snippet = cand.get("card_text", "")
 
@@ -441,8 +448,7 @@ async def run_scraper_job(
                     await page.goto(cand["url"], wait_until="domcontentloaded", timeout=20000)
                     await asyncio.sleep(random.uniform(0.8, 1.5))
 
-                    # Parse detailed specs from product page
-                    spec_items = await page.$$("[class*='specification--item--'], [class*='spec--item--'], [class*='prop-item'], li[class*='spec']")
+                    spec_items = await page.query_selector_all("[class*='specification--item--'], [class*='spec--item--'], [class*='prop-item'], li[class*='spec']")
                     for s in spec_items[:25]:
                         txt = (await s.text_content() or "").strip()
                         if txt and ":" in txt:
@@ -452,8 +458,7 @@ async def run_scraper_job(
                     if body_text:
                         body_snippet = body_text[:4000]
 
-                    # Extract better title or price if present
-                    title_el = await page.$("h1")
+                    title_el = await page.query_selector("h1")
                     if title_el:
                         full_title = (await title_el.text_content() or "").strip()
                         if len(full_title) > len(cand["title"]):
@@ -464,7 +469,6 @@ async def run_scraper_job(
 
                 cand["specs"] = specs
 
-                # Gemini AI Evaluation
                 evaluation = await ai_evaluator.evaluate_product_criteria(
                     item_title=cand["title"],
                     item_price=cand["price"],
@@ -505,7 +509,6 @@ async def run_scraper_job(
             await context.close()
             await browser.close()
 
-        # Save complete search and evaluated items to SQLite database
         search_record = {
             "id": search_id,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

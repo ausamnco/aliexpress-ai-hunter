@@ -115,7 +115,7 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
     }
 
 @app.post("/api/captcha/resume")
-async def resume_captcha_failure(req: scraper.models.CaptchaResumeRequest):
+async def resume_captcha_failure(req: CaptchaResumeRequest):
     result = await scraper.resume_after_captcha_failure(req.search_id, req.action)
     return result
 
