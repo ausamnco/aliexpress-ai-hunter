@@ -16,6 +16,17 @@ document.addEventListener('DOMContentLoaded', () => {
   let captchaDragStart = { x: 0, y: 0 };
   let activeCaptchaImage = new Image();
 
+  // Helper to prevent XSS from scraped content
+  function escapeHTML(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   // DOM Elements
   const navSearchTab = document.getElementById('nav-search-tab');
   const navHistoryTab = document.getElementById('nav-history-tab');
@@ -362,21 +373,21 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="flex items-center gap-3.5 flex-1 min-w-0">
           <div class="w-14 h-14 rounded-lg bg-slate-900 border border-dark-border flex-shrink-0 overflow-hidden flex items-center justify-center">
             ${item.image_url 
-              ? `<img src="${item.image_url}" alt="Product" class="w-full h-full object-cover">` 
+              ? `<img src="${escapeHTML(item.image_url)}" alt="Product" class="w-full h-full object-cover">` 
               : `<i data-lucide="headphones" class="w-6 h-6 text-slate-600"></i>`
             }
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               ${matchBadge}
-              <span class="text-xs font-mono font-bold text-emerald-400">${item.price || 'N/A'}</span>
-              ${item.original_price ? `<span class="text-[10px] text-slate-500 line-through font-mono">${item.original_price}</span>` : ''}
+              <span class="text-xs font-mono font-bold text-emerald-400">${escapeHTML(item.price || 'N/A')}</span>
+              ${item.original_price ? `<span class="text-[10px] text-slate-500 line-through font-mono">${escapeHTML(item.original_price)}</span>` : ''}
             </div>
-            <a href="${item.url}" target="_blank" class="text-sm font-semibold text-slate-100 hover:text-brand-500 transition line-clamp-1 block">
-              ${item.title}
+            <a href="${escapeHTML(item.url)}" target="_blank" class="text-sm font-semibold text-slate-100 hover:text-brand-500 transition line-clamp-1 block">
+              ${escapeHTML(item.title)}
             </a>
             <p class="text-xs text-slate-400 mt-1 line-clamp-1">
-              ${item.verdict_reason || 'AI evaluation complete.'}
+              ${escapeHTML(item.verdict_reason || 'AI evaluation complete.')}
             </p>
           </div>
         </div>
@@ -386,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <i data-lucide="sparkles" class="w-3.5 h-3.5 text-brand-500"></i>
             <span>AI Breakdown</span>
           </button>
-          <a href="${item.url}" target="_blank" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Open Link">
+          <a href="${escapeHTML(item.url)}" target="_blank" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Open Link">
             <i data-lucide="external-link" class="w-4 h-4"></i>
           </a>
         </div>
