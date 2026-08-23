@@ -391,13 +391,13 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const data = await res.json();
 
-      if (data.valid) {
+      if (data.valid && data.quota_available) {
         currentApiKey = key;
         localStorage.setItem('gemini_api_key', key);
         apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-14';
         apiKeyBtnText.textContent = 'Gemini Connected';
         
-        if (data.models) {
+        if (data.models && data.models.length > 0) {
           modelSelect.innerHTML = '';
           data.models.forEach((m, idx) => {
             const opt = document.createElement('option');
@@ -409,11 +409,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-14/15 text-nord-14 border-nord-14/30 block';
-        keyValidationMessage.textContent = '✅ Gemini API key validated successfully! App unlocked.';
-        setTimeout(closeKeyModal, 1000);
+        keyValidationMessage.textContent = '✅ ' + (data.message || 'Gemini API key validated and active! App unlocked.');
+        setTimeout(closeKeyModal, 1200);
+      } else if (data.valid && !data.quota_available) {
+        // Valid key but quota limit / probe failed
+        currentApiKey = key; // Store key so they don't lose it
+        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-13/15 text-nord-13 border-nord-13/30 block leading-relaxed';
+        keyValidationMessage.innerHTML = `
+          <div class="font-bold mb-1 flex items-center gap-1.5 text-nord-13">
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+            <span>Key Authenticated, but Quota is Unavailable</span>
+          </div>
+          <p class="opacity-90 mb-1.5">${escapeHTML(data.message)}</p>
+          <div class="text-[11px] bg-nord-0/60 p-2 rounded-lg border theme-border space-y-1">
+            <p>• <strong>Free Tier Quota</strong>: Ensure you generated your key under a standard Google AI Studio project with Gemini API enabled.</p>
+            <p>• <strong>Rate Limit</strong>: If you recently ran multiple requests, wait 60 seconds for the free tier per-minute quota to reset.</p>
+            <p>• Check your quota dashboard at <a href="https://aistudio.google.com/" target="_blank" class="text-nord-8 underline font-semibold">Google AI Studio</a>.</p>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
       } else {
-        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
-        keyValidationMessage.textContent = `❌ ${data.message || 'Invalid Gemini API key.'}`;
+        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block leading-relaxed';
+        keyValidationMessage.innerHTML = `
+          <div class="font-bold mb-1 flex items-center gap-1.5 text-nord-11">
+            <i data-lucide="x-circle" class="w-4 h-4"></i>
+            <span>Validation Failed: ${escapeHTML(data.error_type || 'AUTH_ERROR')}</span>
+          </div>
+          <p class="opacity-90">${escapeHTML(data.message || 'Invalid Gemini API key.')}</p>
+        `;
+        if (window.lucide) lucide.createIcons();
       }
     } catch (err) {
       keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';

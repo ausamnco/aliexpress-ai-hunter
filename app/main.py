@@ -40,14 +40,16 @@ app.add_middleware(
 @app.post("/api/validate-key")
 async def validate_gemini_key(req: ValidateKeyRequest):
     if not req.api_key or len(req.api_key.strip()) < 10:
-        return {"valid": False, "message": "API key is too short or empty."}
+        return {
+            "valid": False,
+            "quota_available": False,
+            "error_type": "TOO_SHORT",
+            "message": "API key is too short or empty.",
+            "models": []
+        }
     
-    is_valid = await ai_evaluator.validate_api_key(req.api_key.strip())
-    if is_valid:
-        models = await ai_evaluator.list_available_models(req.api_key.strip())
-        return {"valid": True, "message": "Gemini API key is valid and connected!", "models": models}
-    else:
-        return {"valid": False, "message": "Invalid Gemini API key or quota exceeded."}
+    diag = await ai_evaluator.diagnose_and_validate_key(req.api_key.strip())
+    return diag
 
 @app.post("/api/models")
 async def get_gemini_models(req: ValidateKeyRequest):
