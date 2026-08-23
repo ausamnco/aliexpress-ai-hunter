@@ -40,12 +40,14 @@ class ValidateKeyRequest(BaseModel):
 
 class CaptchaActionRequest(BaseModel):
     search_id: str
-    action: str  # "slide", "drag", "resolve", "cancel"
+    action: str  # "resolve", "sync_cookie", "sync_url", "cancel"
     start_x: Optional[float] = None
     start_y: Optional[float] = None
     end_x: Optional[float] = None
     end_y: Optional[float] = None
-    distance_pct: Optional[float] = 1.0
+    distance_pct: Optional[float] = None
+    cookie_str: Optional[str] = None
+    redirect_url: Optional[str] = None
 
 class CaptchaResumeRequest(BaseModel):
     search_id: str

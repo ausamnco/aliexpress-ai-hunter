@@ -163,11 +163,8 @@ async def perform_captcha_action(req: CaptchaActionRequest):
     result = await scraper.handle_captcha_interaction(
         search_id=req.search_id,
         action=req.action,
-        start_x=req.start_x,
-        start_y=req.start_y,
-        end_x=req.end_x,
-        end_y=req.end_y,
-        distance_pct=req.distance_pct
+        cookie_str=req.cookie_str,
+        redirect_url=req.redirect_url
     )
     return result
 

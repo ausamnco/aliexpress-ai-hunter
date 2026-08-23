@@ -912,6 +912,52 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  const captchaSyncInput = document.getElementById('captcha-sync-input');
+  const applySyncBtn = document.getElementById('apply-sync-btn');
+
+  if (applySyncBtn && captchaSyncInput) {
+    applySyncBtn.addEventListener('click', async () => {
+      if (!currentSearchId) return;
+      const syncValue = captchaSyncInput.value.trim();
+      captchaLoadingOverlay.classList.remove('hidden');
+
+      try {
+        const isUrl = syncValue.startsWith('http://') || syncValue.startsWith('https://');
+        const payload = {
+          search_id: currentSearchId,
+          action: isUrl ? 'sync_url' : 'sync_cookie',
+          redirect_url: isUrl ? syncValue : null,
+          cookie_str: !isUrl && syncValue ? syncValue : null
+        };
+
+        const res = await fetch('/api/captcha/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        captchaLoadingOverlay.classList.add('hidden');
+
+        if (data.resolved) {
+          captchaSyncInput.value = '';
+          hideCaptchaModal();
+        } else {
+          alert(data.message || 'Verification could not be confirmed with the provided link. Please ensure you copied the full URL from your tab.');
+        }
+      } catch (err) {
+        captchaLoadingOverlay.classList.add('hidden');
+        alert('Error applying session sync: ' + err.message);
+      }
+    });
+
+    captchaSyncInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        applySyncBtn.click();
+      }
+    });
+  }
+
   cancelCaptchaBtn.addEventListener('click', async () => {
     if (!currentSearchId) return;
     try {

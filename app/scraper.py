@@ -60,26 +60,67 @@ sessions: Dict[str, ScraperSession] = {}
 async def handle_captcha_interaction(
     search_id: str,
     action: str,
-    start_x: Optional[float] = None,
-    start_y: Optional[float] = None,
-    end_x: Optional[float] = None,
-    end_y: Optional[float] = None,
-    distance_pct: Optional[float] = None
+    cookie_str: Optional[str] = None,
+    redirect_url: Optional[str] = None,
+    **kwargs
 ) -> Dict[str, Any]:
     session = sessions.get(search_id)
-    if not session or not session.active_page:
+    if not session or not session.active_page or not session.active_context:
         return {"success": False, "message": "No active scraper session or page."}
 
+    context = session.active_context
     page = session.active_page
 
-    if action in ["resolve", "check"]:
+    if action in ["resolve", "check", "sync_cookie", "sync_url"]:
+        cookies_to_add = []
+
+        # 1. Parse cookie string if provided
+        if cookie_str:
+            clean_str = cookie_str.strip()
+            # Handle document.cookie format: "name=value; name2=value2"
+            pairs = [p.strip() for p in clean_str.split(";") if p.strip()]
+            for p in pairs:
+                if "=" in p:
+                    k, v = p.split("=", 1)
+                    k_clean = k.strip()
+                    v_clean = v.strip()
+                    if k_clean:
+                        cookies_to_add.append({
+                            "name": k_clean,
+                            "value": v_clean,
+                            "domain": ".aliexpress.com",
+                            "path": "/"
+                        })
+
+        # 2. Parse redirect_url if provided
+        if redirect_url and "aliexpress.com" in redirect_url:
+            parsed = urllib.parse.urlparse(redirect_url)
+            params = urllib.parse.parse_qs(parsed.query)
+            if "x5secdata" in params:
+                cookies_to_add.append({
+                    "name": "x5sec",
+                    "value": params["x5secdata"][0],
+                    "domain": ".aliexpress.com",
+                    "path": "/"
+                })
+
+        if cookies_to_add:
+            logger.info(f"Injecting {len(cookies_to_add)} cookies into Playwright context...")
+            try:
+                await context.add_cookies(cookies_to_add)
+            except Exception as e:
+                logger.warning(f"Error adding cookies to context: {e}")
+
+        # Check page status
         try:
-            if "punish" in page.url:
-                # Reload page to check if verification passed
+            if redirect_url and "aliexpress.com" in redirect_url and "punish" not in redirect_url:
+                logger.info(f"Navigating Playwright to verified redirect URL: {redirect_url}")
+                await page.goto(redirect_url, wait_until="domcontentloaded", timeout=20000)
+            elif "punish" in page.url:
                 await page.reload(wait_until="domcontentloaded", timeout=12000)
-                await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
         except Exception as e:
-            logger.warning(f"Error checking verification status: {e}")
+            logger.warning(f"Error refreshing verification status: {e}")
 
         resolved = "punish" not in page.url
         if resolved:
@@ -228,25 +269,25 @@ async def run_scraper_job(
                 # Check for verification challenge
                 is_punish = "punish" in page.url or (await page.query_selector("#nc_1_n1z, .btn_slide") is not None)
                 if is_punish:
-                    logger.info("Verification challenge detected! Presenting actual AliExpress page to user...")
+                    logger.info("Verification challenge detected! Presenting live AliExpress page to user...")
                     challenge_url = page.url
                     if "punish" not in challenge_url:
                         challenge_url = search_url
 
                     session.challenge_url = challenge_url
-                    session.stage = "AliExpress Verification Required. Please complete the challenge on the actual page."
+                    session.stage = "AliExpress Verification Required. Please complete the challenge."
                     session.captcha_event.clear()
 
                     await session.emit_event("captcha_required", {
                         "challenge_url": challenge_url,
                         "proxy_url": f"/api/captcha/live/{search_id}",
-                        "message": "AliExpress verification challenge required. Please interact with the actual AliExpress page below."
+                        "message": "AliExpress verification challenge required. Please interact with the challenge below or open in a new tab."
                     })
 
-                    # Poll and wait up to 180s for user to solve challenge on the actual page
+                    # Poll and wait up to 300s for user to complete verification
                     solved = False
                     start_wait = time.time()
-                    while time.time() - start_wait < 180:
+                    while time.time() - start_wait < 300:
                         if session.captcha_event.is_set():
                             solved = True
                             break
@@ -258,7 +299,7 @@ async def run_scraper_job(
 
                     # Check if cleared
                     if solved or "punish" not in page.url:
-                        logger.info("Verification successfully cleared on actual AliExpress page!")
+                        logger.info("Verification successfully cleared!")
                         await session.emit_event("captcha_cleared")
                     else:
                         remaining = search_queries[query_index + 1:]
