@@ -19,6 +19,37 @@ async def validate_api_key(api_key: str) -> bool:
         logger.error(f"API key validation error: {e}")
         return False
 
+async def list_available_models(api_key: str) -> List[str]:
+    try:
+        client = genai.Client(api_key=api_key)
+        models_pager = client.models.list()
+        
+        discovered_models = []
+        for m in models_pager:
+            name = m.name
+            if name.startswith("models/"):
+                name = name.replace("models/", "")
+            # Filter to relevant generative models (gemini, gemma)
+            if "gemini" in name or "gemma" in name:
+                # exclude embed/vision-only legacy models if any
+                if not any(x in name for x in ["embedding", "bison", "aqa"]):
+                    discovered_models.append(name)
+                    
+        # Sort so recommended models are first
+        priority = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-2.5-pro", "gemini-3.1-pro-preview"]
+        sorted_models = []
+        for p in priority:
+            if p in discovered_models:
+                sorted_models.append(p)
+        for m in discovered_models:
+            if m not in sorted_models:
+                sorted_models.append(m)
+                
+        return sorted_models if sorted_models else ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"]
+    except Exception as e:
+        logger.warning(f"Error listing Gemini models: {e}")
+        return ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-2.5-pro"]
+
 async def generate_search_variations(search_term: str, conditions: str, api_key: str, model_name: str = "gemini-2.5-flash") -> List[str]:
     try:
         client = genai.Client(api_key=api_key)
@@ -99,7 +130,6 @@ You are an expert product evaluation assistant. You must rigorously check if the
         
     except Exception as e:
         logger.error(f"Gemini evaluation error for '{item_title}': {e}")
-        # Fallback basic evaluation
         return ProductEvaluation(
             is_match=False,
             confidence=0.5,

@@ -1,22 +1,36 @@
-// AliExpress AI Product Hunter - Frontend Application
+// AliExpress AI Product Hunter - Frontend Application (Nord & Light Themes)
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Initialize Lucide icons
   if (window.lucide) {
     lucide.createIcons();
   }
 
+  // Country to Currency Mapping
+  const COUNTRY_CURRENCY_MAP = {
+    AU: 'AUD', US: 'USD', GB: 'GBP', CA: 'CAD', NZ: 'NZD',
+    DE: 'EUR', FR: 'EUR', IT: 'EUR', ES: 'EUR', NL: 'EUR',
+    AT: 'EUR', BE: 'EUR', FI: 'EUR', GR: 'EUR', IE: 'EUR', PT: 'EUR',
+    JP: 'JPY', SG: 'SGD', BR: 'BRL', MX: 'MXN', KR: 'KRW',
+    CH: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN',
+    IN: 'INR', PH: 'PHP', TH: 'THB', MY: 'MYR', ID: 'IDR',
+    VN: 'VND', SA: 'SAR', AE: 'AED', ZA: 'ZAR', TR: 'TRY'
+  };
+
   // State
   let currentApiKey = localStorage.getItem('gemini_api_key') || '';
+  let currentTheme = localStorage.getItem('app_theme') || 'dark';
   let activeEventSource = null;
   let currentSearchId = null;
   let activeProducts = [];
-  let activeFilter = 'all'; // 'all', 'matches', 'excluded'
+  let activeFilter = 'all';
   let isDraggingCaptcha = false;
   let captchaDragStart = { x: 0, y: 0 };
   let activeCaptchaImage = new Image();
+  let conditionsList = [''];
+  let suggestDebounceTimeout = null;
+  let activeSuggestIndex = -1;
 
-  // Helper to prevent XSS from scraped content
+  // Helper to prevent XSS
   function escapeHTML(str) {
     if (!str) return '';
     return String(str)
@@ -28,6 +42,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // DOM Elements
+  const themeToggleBtn = document.getElementById('theme-toggle-btn');
+  const themeIconDark = document.getElementById('theme-icon-dark');
+  const themeIconLight = document.getElementById('theme-icon-light');
+
   const navSearchTab = document.getElementById('nav-search-tab');
   const navHistoryTab = document.getElementById('nav-history-tab');
   const searchSection = document.getElementById('search-section');
@@ -48,11 +66,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Search Form Elements
   const searchForm = document.getElementById('search-form');
   const searchTermInput = document.getElementById('search-term-input');
-  const conditionsInput = document.getElementById('conditions-input');
-  const maxCandidatesSelect = document.getElementById('max-candidates-select');
-  const shipCountryInput = document.getElementById('ship-country-input');
-  const currencyInput = document.getElementById('currency-input');
+  const suggestionsDropdown = document.getElementById('suggestions-dropdown');
+  const conditionsContainer = document.getElementById('conditions-container');
+  const addConditionBtn = document.getElementById('add-condition-btn');
+  const conditionCountBadge = document.getElementById('condition-count-badge');
+  const shipCountrySelect = document.getElementById('ship-country-select');
+  const currencySelect = document.getElementById('currency-select');
   const modelSelect = document.getElementById('model-select');
+  const maxCandidatesSelect = document.getElementById('max-candidates-select');
   const startSearchBtn = document.getElementById('start-search-btn');
 
   // Live Status & Results Elements
@@ -69,8 +90,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const countAll = document.getElementById('count-all');
   const countMatches = document.getElementById('count-matches');
   const countExcluded = document.getElementById('count-excluded');
-
-  // Filter Buttons
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
 
   // CAPTCHA Modal Elements
@@ -90,63 +109,265 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalCriteriaList = document.getElementById('modal-criteria-list');
   const modalSpecsList = document.getElementById('modal-specs-list');
 
-  // History Grid
+  // History Grid Elements
   const historyGrid = document.getElementById('history-grid');
   const historyEmptyState = document.getElementById('history-empty-state');
   const refreshHistoryBtn = document.getElementById('refresh-history-btn');
 
-  // 1. Initialize API Key Status
-  function updateApiKeyUI() {
-    if (currentApiKey) {
-      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400';
-      apiKeyBtnText.textContent = 'Gemini Key Configured';
-      geminiKeyInput.value = currentApiKey;
+  // 1. Theme Management (Nord Dark & Light)
+  function applyTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('app_theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+      themeIconDark.classList.remove('hidden');
+      themeIconLight.classList.add('hidden');
     } else {
-      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
-      apiKeyBtnText.textContent = 'Set Gemini API Key';
-      geminiKeyInput.value = '';
+      document.documentElement.classList.remove('dark');
+      themeIconDark.classList.add('hidden');
+      themeIconLight.classList.remove('hidden');
     }
   }
-  updateApiKeyUI();
+  applyTheme(currentTheme);
 
-  // Navigation Logic
+  themeToggleBtn.addEventListener('click', () => {
+    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // 2. Navigation Tabs
   navSearchTab.addEventListener('click', () => {
-    navSearchTab.classList.add('active', 'text-brand-500');
-    navSearchTab.classList.remove('text-slate-400');
-    navHistoryTab.classList.remove('active', 'text-brand-500');
-    navHistoryTab.classList.add('text-slate-400');
+    navSearchTab.classList.add('active');
+    navSearchTab.classList.remove('opacity-70');
+    navHistoryTab.classList.remove('active');
+    navHistoryTab.classList.add('opacity-70');
     searchSection.classList.remove('hidden');
     historySection.classList.add('hidden');
   });
 
   navHistoryTab.addEventListener('click', () => {
-    navHistoryTab.classList.add('active', 'text-brand-500');
-    navHistoryTab.classList.remove('text-slate-400');
-    navSearchTab.classList.remove('active', 'text-brand-500');
-    navSearchTab.classList.add('text-slate-400');
+    navHistoryTab.classList.add('active');
+    navHistoryTab.classList.remove('opacity-70');
+    navSearchTab.classList.remove('active');
+    navSearchTab.classList.add('opacity-70');
     historySection.classList.remove('hidden');
     searchSection.classList.add('hidden');
     loadHistory();
   });
 
-  // Preset Chips
-  document.querySelectorAll('.preset-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      searchTermInput.value = chip.dataset.product || '';
-      conditionsInput.value = chip.dataset.conditions || '';
-      searchTermInput.focus();
+  // 3. Dynamic Numbered Criteria Fields (Max 10)
+  function renderConditions() {
+    conditionsContainer.innerHTML = '';
+    conditionCountBadge.textContent = `${conditionsList.length} / 10`;
+
+    conditionsList.forEach((condText, idx) => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2';
+
+      row.innerHTML = `
+        <div class="w-7 h-9 rounded-xl theme-bg-input border theme-border flex items-center justify-center text-xs font-mono font-bold text-nord-8 flex-shrink-0">
+          ${idx + 1}
+        </div>
+        <input type="text" value="${escapeHTML(condText)}" placeholder="e.g. Must have hardware ANC, not ENC" class="condition-input flex-1 theme-bg-input border theme-border rounded-xl px-3.5 py-2 text-xs text-nord-5 placeholder-nord-3 focus:outline-none focus:border-nord-8" data-index="${idx}">
+        ${idx > 0 ? `
+          <button type="button" class="remove-cond-btn p-2 rounded-xl text-nord-11 hover:bg-nord-11/10 transition border border-nord-11/20 flex-shrink-0" data-index="${idx}" title="Remove condition">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        ` : ''}
+      `;
+
+      conditionsContainer.appendChild(row);
     });
+
+    if (window.lucide) lucide.createIcons();
+
+    // Attach Input Listeners
+    document.querySelectorAll('.condition-input').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const index = parseInt(e.target.dataset.index, 10);
+        conditionsList[index] = e.target.value;
+      });
+    });
+
+    // Attach Remove Listeners
+    document.querySelectorAll('.remove-cond-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const index = parseInt(btn.dataset.index, 10);
+        conditionsList.splice(index, 1);
+        renderConditions();
+      });
+    });
+
+    // Disable add button if 10 reached
+    if (conditionsList.length >= 10) {
+      addConditionBtn.disabled = true;
+      addConditionBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+      addConditionBtn.disabled = false;
+      addConditionBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  }
+
+  addConditionBtn.addEventListener('click', () => {
+    if (conditionsList.length < 10) {
+      conditionsList.push('');
+      renderConditions();
+      const inputs = document.querySelectorAll('.condition-input');
+      if (inputs.length > 0) inputs[inputs.length - 1].focus();
+    }
   });
 
-  // API Key Modal Handlers
+  // Initial render of conditions
+  renderConditions();
+
+  // 4. Destination Country & Currency Auto-Sync
+  shipCountrySelect.addEventListener('change', () => {
+    const selectedCountry = shipCountrySelect.value;
+    const autoCurrency = COUNTRY_CURRENCY_MAP[selectedCountry] || 'USD';
+    
+    // Auto-select currency if supported option exists
+    const matchingOption = currencySelect.querySelector(`option[value="${autoCurrency}"]`);
+    if (matchingOption) {
+      currencySelect.value = autoCurrency;
+    } else {
+      currencySelect.value = 'USD';
+    }
+  });
+
+  // 5. Generic Search Term Live Autofill / Spell Correction
+  searchTermInput.addEventListener('input', () => {
+    const query = searchTermInput.value.trim();
+    if (suggestDebounceTimeout) clearTimeout(suggestDebounceTimeout);
+
+    if (query.length < 2) {
+      suggestionsDropdown.classList.add('hidden');
+      return;
+    }
+
+    suggestDebounceTimeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/suggestions?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        const suggestions = data.suggestions || [];
+
+        if (suggestions.length === 0) {
+          suggestionsDropdown.classList.add('hidden');
+          return;
+        }
+
+        suggestionsDropdown.innerHTML = '';
+        activeSuggestIndex = -1;
+
+        suggestions.forEach((term, index) => {
+          const item = document.createElement('div');
+          item.className = 'suggestion-item px-3.5 py-2 text-xs text-nord-5 cursor-pointer flex items-center gap-2';
+          item.innerHTML = `<i data-lucide="search" class="w-3.5 h-3.5 text-nord-3"></i><span>${escapeHTML(term)}</span>`;
+          item.addEventListener('click', () => {
+            searchTermInput.value = term;
+            suggestionsDropdown.classList.add('hidden');
+          });
+          suggestionsDropdown.appendChild(item);
+        });
+
+        if (window.lucide) lucide.createIcons();
+        suggestionsDropdown.classList.remove('hidden');
+      } catch (err) {
+        suggestionsDropdown.classList.add('hidden');
+      }
+    }, 180);
+  });
+
+  // Keyboard navigation for suggestions
+  searchTermInput.addEventListener('keydown', (e) => {
+    const items = suggestionsDropdown.querySelectorAll('.suggestion-item');
+    if (suggestionsDropdown.classList.contains('hidden') || items.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeSuggestIndex = (activeSuggestIndex + 1) % items.length;
+      updateSuggestionHighlight(items);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeSuggestIndex = (activeSuggestIndex - 1 + items.length) % items.length;
+      updateSuggestionHighlight(items);
+    } else if (e.key === 'Enter' && activeSuggestIndex >= 0) {
+      e.preventDefault();
+      items[activeSuggestIndex].click();
+    } else if (e.key === 'Escape') {
+      suggestionsDropdown.classList.add('hidden');
+    }
+  });
+
+  function updateSuggestionHighlight(items) {
+    items.forEach((it, idx) => {
+      if (idx === activeSuggestIndex) {
+        it.classList.add('selected');
+        searchTermInput.value = it.innerText.trim();
+      } else {
+        it.classList.remove('selected');
+      }
+    });
+  }
+
+  // Close suggestions when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!searchTermInput.contains(e.target) && !suggestionsDropdown.contains(e.target)) {
+      suggestionsDropdown.classList.add('hidden');
+    }
+  });
+
+  // 6. Mandatory Entrance Gate & Gemini API Key
+  async function fetchAvailableModels(apiKey) {
+    try {
+      const res = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: apiKey })
+      });
+      const data = await res.json();
+      if (data.models && data.models.length > 0) {
+        modelSelect.innerHTML = '';
+        data.models.forEach((m, idx) => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = idx === 0 ? `${m} (Recommended)` : m;
+          if (idx === 0) opt.selected = true;
+          modelSelect.appendChild(opt);
+        });
+      }
+    } catch (e) {
+      console.warn('Error fetching dynamic models:', e);
+    }
+  }
+
+  function checkApiKeyEntranceGate() {
+    if (!currentApiKey) {
+      // Force entrance gate modal (non-dismissible)
+      closeApiKeyModal.classList.add('hidden');
+      cancelApiKeyBtn.classList.add('hidden');
+      apiKeyModal.classList.remove('hidden');
+      apiKeyModal.classList.add('flex');
+      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-11 animate-pulse';
+      apiKeyBtnText.textContent = 'API Key Required';
+    } else {
+      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-14';
+      apiKeyBtnText.textContent = 'Gemini Connected';
+      geminiKeyInput.value = currentApiKey;
+      fetchAvailableModels(currentApiKey);
+    }
+  }
+  checkApiKeyEntranceGate();
+
   openApiKeyBtn.addEventListener('click', () => {
     keyValidationMessage.classList.add('hidden');
+    closeApiKeyModal.classList.remove('hidden');
+    cancelApiKeyBtn.classList.remove('hidden');
     apiKeyModal.classList.remove('hidden');
     apiKeyModal.classList.add('flex');
     geminiKeyInput.focus();
   });
 
   function closeKeyModal() {
+    if (!currentApiKey) return; // Prevent closing if no valid key set
     apiKeyModal.classList.add('hidden');
     apiKeyModal.classList.remove('flex');
   }
@@ -159,9 +380,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const key = geminiKeyInput.value.trim();
     if (!key) return;
 
-    keyValidationMessage.classList.remove('hidden', 'bg-emerald-500/10', 'text-emerald-400', 'border-emerald-500/20', 'bg-red-500/10', 'text-red-400', 'border-red-500/20');
-    keyValidationMessage.classList.add('bg-slate-800', 'text-slate-300', 'border', 'border-slate-700');
-    keyValidationMessage.textContent = 'Validating key with Gemini API...';
+    keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-0 text-nord-4 border-nord-2 block';
+    keyValidationMessage.textContent = 'Validating key with Google Gemini API...';
 
     try {
       const res = await fetch('/api/validate-key', {
@@ -174,21 +394,34 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.valid) {
         currentApiKey = key;
         localStorage.setItem('gemini_api_key', key);
-        updateApiKeyUI();
-        keyValidationMessage.className = 'text-xs p-2.5 rounded-lg border bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-        keyValidationMessage.textContent = '✅ Key validated successfully! Saved to browser.';
-        setTimeout(closeKeyModal, 1200);
+        apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-14';
+        apiKeyBtnText.textContent = 'Gemini Connected';
+        
+        if (data.models) {
+          modelSelect.innerHTML = '';
+          data.models.forEach((m, idx) => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = idx === 0 ? `${m} (Recommended)` : m;
+            if (idx === 0) opt.selected = true;
+            modelSelect.appendChild(opt);
+          });
+        }
+
+        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-14/15 text-nord-14 border-nord-14/30 block';
+        keyValidationMessage.textContent = '✅ Gemini API key validated successfully! App unlocked.';
+        setTimeout(closeKeyModal, 1000);
       } else {
-        keyValidationMessage.className = 'text-xs p-2.5 rounded-lg border bg-red-500/10 text-red-400 border-red-500/20';
-        keyValidationMessage.textContent = `❌ ${data.message || 'Invalid API Key'}`;
+        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
+        keyValidationMessage.textContent = `❌ ${data.message || 'Invalid Gemini API key.'}`;
       }
     } catch (err) {
-      keyValidationMessage.className = 'text-xs p-2.5 rounded-lg border bg-red-500/10 text-red-400 border-red-500/20';
-      keyValidationMessage.textContent = '❌ Error connecting to server.';
+      keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
+      keyValidationMessage.textContent = '❌ Error connecting to validation server.';
     }
   });
 
-  // Filter Buttons
+  // 7. Filter Buttons
   filterTabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       filterTabBtns.forEach(b => b.classList.remove('active'));
@@ -198,23 +431,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Search Form Submission
+  // 8. Search Form Submission
   searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!currentApiKey) {
-      openApiKeyBtn.click();
+      checkApiKeyEntranceGate();
       return;
     }
 
     const searchTerm = searchTermInput.value.trim();
-    const conditions = conditionsInput.value.trim();
-    if (!searchTerm || !conditions) return;
+    const validConditions = conditionsList.map(c => c.trim()).filter(Boolean);
 
-    // Reset UI
+    if (!searchTerm) {
+      searchTermInput.focus();
+      return;
+    }
+
+    // Add Destination Country delivery check as mandatory criterion
+    const selectedCountryText = shipCountrySelect.options[shipCountrySelect.selectedIndex].text;
+    const countryCriteriaText = `Deliverable and shippable to ${selectedCountryText}`;
+    if (!validConditions.some(c => c.toLowerCase().includes('deliverable') || c.toLowerCase().includes('shipping'))) {
+      validConditions.push(countryCriteriaText);
+    }
+
+    const joinedConditions = validConditions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+
+    // Reset UI for live execution
     activeProducts = [];
     renderProducts();
     liveStatusCard.classList.remove('hidden');
-    liveStageTitle.textContent = 'Starting AI Search...';
+    liveStageTitle.textContent = 'Initiating AI Search Pipeline...';
     liveProgressBadge.textContent = '0%';
     liveProgressBar.style.width = '0%';
     liveStatDiscovered.textContent = '0';
@@ -223,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsEmptyState.classList.add('hidden');
     productsList.classList.remove('hidden');
     startSearchBtn.disabled = true;
-    startSearchBtn.classList.add('opacity-70', 'cursor-not-allowed');
+    startSearchBtn.classList.add('opacity-60', 'cursor-not-allowed');
 
     try {
       const res = await fetch('/api/search', {
@@ -231,11 +477,11 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           search_term: searchTerm,
-          conditions: conditions,
+          conditions: joinedConditions,
           gemini_api_key: currentApiKey,
           max_candidates: parseInt(maxCandidatesSelect.value, 10),
-          ship_country: shipCountryInput.value.trim(),
-          currency: currencyInput.value.trim(),
+          ship_country: shipCountrySelect.value,
+          currency: currencySelect.value,
           model_name: modelSelect.value
         })
       });
@@ -247,34 +493,29 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         alert('Failed to start search: ' + (data.detail || 'Unknown error'));
         startSearchBtn.disabled = false;
-        startSearchBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+        startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
       }
     } catch (err) {
       alert('Error initiating search: ' + err.message);
       startSearchBtn.disabled = false;
-      startSearchBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+      startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
     }
   });
 
-  // SSE Stream Listener
+  // 9. SSE Stream Listener
   function connectSSEStream(searchId) {
-    if (activeEventSource) {
-      activeEventSource.close();
-    }
-
+    if (activeEventSource) activeEventSource.close();
     activeEventSource = new EventSource(`/api/search/stream/${searchId}`);
 
     activeEventSource.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
         handleStreamEvent(payload);
-      } catch (err) {
-        console.error('Error parsing SSE event:', err);
-      }
+      } catch (err) {}
     };
 
     activeEventSource.onerror = (err) => {
-      console.warn('SSE connection closed or interrupted:', err);
+      console.warn('SSE connection interrupted:', err);
     };
   }
 
@@ -312,11 +553,11 @@ document.addEventListener('DOMContentLoaded', () => {
           activeProducts = data.items;
         }
         renderProducts();
-        liveStageTitle.textContent = `Completed! ${data.total_matched} matching products found.`;
+        liveStageTitle.textContent = `Completed! ${data.total_matched} matching products verified.`;
         liveProgressBadge.textContent = '100%';
         liveProgressBar.style.width = '100%';
         startSearchBtn.disabled = false;
-        startSearchBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+        startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
         if (activeEventSource) activeEventSource.close();
         loadHistoryCount();
         break;
@@ -324,13 +565,13 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'search_failed':
         liveStageTitle.textContent = `Error: ${data.error || 'Search encountered an issue.'}`;
         startSearchBtn.disabled = false;
-        startSearchBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+        startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
         if (activeEventSource) activeEventSource.close();
         break;
     }
   }
 
-  // Render Product Items
+  // 10. Render Product Cards
   function renderProducts() {
     countAll.textContent = activeProducts.length;
     const matchesCount = activeProducts.filter(p => p.is_match).length;
@@ -359,45 +600,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     filtered.forEach((item, index) => {
       const card = document.createElement('div');
-      card.className = `p-4 rounded-xl border transition-all ${
+      card.className = `p-4 rounded-2xl border transition-all ${
         item.is_match 
-          ? 'bg-emerald-950/20 border-emerald-500/30 hover:border-emerald-500/50' 
-          : 'bg-dark-card border-dark-border/80 hover:border-slate-700'
+          ? 'bg-nord-14/10 border-nord-14/30 hover:border-nord-14/50' 
+          : 'theme-bg-card theme-border hover:border-nord-3'
       } flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between`;
 
       const matchBadge = item.is_match 
-        ? `<span class="badge-match text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"><i data-lucide="check-circle-2" class="w-3 h-3"></i> Verified Match</span>`
-        : `<span class="badge-fail text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"><i data-lucide="x-circle" class="w-3 h-3"></i> Filtered Out</span>`;
+        ? `<span class="badge-match text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"><i data-lucide="check-circle-2" class="w-3 h-3"></i> Verified Match</span>`
+        : `<span class="badge-fail text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"><i data-lucide="x-circle" class="w-3 h-3"></i> Filtered Out</span>`;
 
       card.innerHTML = `
         <div class="flex items-center gap-3.5 flex-1 min-w-0">
-          <div class="w-14 h-14 rounded-lg bg-slate-900 border border-dark-border flex-shrink-0 overflow-hidden flex items-center justify-center">
+          <div class="w-14 h-14 rounded-xl bg-nord-0/70 border theme-border flex-shrink-0 overflow-hidden flex items-center justify-center">
             ${item.image_url 
               ? `<img src="${escapeHTML(item.image_url)}" alt="Product" class="w-full h-full object-cover">` 
-              : `<i data-lucide="headphones" class="w-6 h-6 text-slate-600"></i>`
+              : `<i data-lucide="package" class="w-6 h-6 text-nord-3"></i>`
             }
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 mb-1 flex-wrap">
               ${matchBadge}
-              <span class="text-xs font-mono font-bold text-emerald-400">${escapeHTML(item.price || 'N/A')}</span>
-              ${item.original_price ? `<span class="text-[10px] text-slate-500 line-through font-mono">${escapeHTML(item.original_price)}</span>` : ''}
+              <span class="text-xs font-mono font-bold text-nord-14">${escapeHTML(item.price || 'N/A')}</span>
+              ${item.original_price ? `<span class="text-[10px] text-nord-3 line-through font-mono">${escapeHTML(item.original_price)}</span>` : ''}
             </div>
-            <a href="${escapeHTML(item.url)}" target="_blank" class="text-sm font-semibold text-slate-100 hover:text-brand-500 transition line-clamp-1 block">
+            <a href="${escapeHTML(item.url)}" target="_blank" class="text-sm font-bold text-nord-6 hover:text-nord-8 transition line-clamp-1 block">
               ${escapeHTML(item.title)}
             </a>
-            <p class="text-xs text-slate-400 mt-1 line-clamp-1">
+            <p class="text-xs text-nord-4 opacity-80 mt-1 line-clamp-1">
               ${escapeHTML(item.verdict_reason || 'AI evaluation complete.')}
             </p>
           </div>
         </div>
 
         <div class="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
-          <button class="view-detail-btn px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition flex items-center gap-1.5" data-index="${index}">
-            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-brand-500"></i>
+          <button class="view-detail-btn px-3.5 py-2 rounded-xl theme-bg-input hover:border-nord-8 text-nord-5 text-xs font-semibold border theme-border transition flex items-center gap-1.5" data-index="${index}">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-nord-8"></i>
             <span>AI Breakdown</span>
           </button>
-          <a href="${escapeHTML(item.url)}" target="_blank" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Open Link">
+          <a href="${escapeHTML(item.url)}" target="_blank" class="p-2 rounded-xl theme-bg-input hover:border-nord-8 text-nord-4 border theme-border transition" title="Open Product Page">
             <i data-lucide="external-link" class="w-4 h-4"></i>
           </a>
         </div>
@@ -406,10 +647,8 @@ document.addEventListener('DOMContentLoaded', () => {
       productsList.appendChild(card);
     });
 
-    // Reinitialize icons in new cards
     if (window.lucide) lucide.createIcons();
 
-    // Attach click listeners to view detail
     document.querySelectorAll('.view-detail-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const item = filtered[parseInt(btn.dataset.index, 10)];
@@ -418,7 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Show Product Detail Modal
+  // 11. Show Product Detail Modal
   function showProductDetail(item) {
     if (!item) return;
 
@@ -426,56 +665,53 @@ document.addEventListener('DOMContentLoaded', () => {
     modalProductPrice.textContent = item.price || 'N/A';
     modalProductLink.href = item.url;
 
-    // Verdict Box
-    modalVerdictBox.className = `p-3.5 rounded-xl border ${
+    modalVerdictBox.className = `p-3.5 rounded-2xl border ${
       item.is_match 
-        ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300' 
-        : 'bg-red-950/30 border-red-500/40 text-red-300'
+        ? 'bg-nord-14/15 border-nord-14/35 text-nord-14' 
+        : 'bg-nord-11/15 border-nord-11/35 text-nord-11'
     }`;
     modalVerdictBox.innerHTML = `
-      <div class="font-bold flex items-center gap-2 mb-1">
+      <div class="font-bold flex items-center gap-2 mb-1 text-sm">
         <i data-lucide="${item.is_match ? 'check-circle-2' : 'x-circle'}" class="w-4 h-4"></i>
         <span>${item.is_match ? 'Product Matches All User Criteria' : 'Product Excluded'}</span>
       </div>
-      <p class="text-xs text-slate-300 leading-relaxed">${item.verdict_reason || 'No detailed verdict summary provided.'}</p>
+      <p class="text-xs opacity-90 leading-relaxed">${escapeHTML(item.verdict_reason || 'No detailed verdict summary.')}</p>
     `;
 
-    // Criteria Breakdown List
     modalCriteriaList.innerHTML = '';
     const breakdown = item.criteria_breakdown || [];
     if (breakdown.length === 0) {
-      modalCriteriaList.innerHTML = '<p class="text-slate-500 text-xs">No individual criteria breakdown items.</p>';
+      modalCriteriaList.innerHTML = '<p class="text-nord-3 text-xs">No criteria breakdown items.</p>';
     } else {
       breakdown.forEach(crit => {
         const critDiv = document.createElement('div');
-        critDiv.className = `p-2.5 rounded-lg border ${
+        critDiv.className = `p-3 rounded-xl border ${
           crit.met 
-            ? 'bg-emerald-950/20 border-emerald-500/30 text-slate-200' 
-            : 'bg-red-950/20 border-red-500/30 text-slate-300'
+            ? 'bg-nord-14/10 border-nord-14/25 text-nord-5' 
+            : 'bg-nord-11/10 border-nord-11/25 text-nord-4'
         }`;
         critDiv.innerHTML = `
-          <div class="flex items-center justify-between font-semibold text-xs mb-1">
+          <div class="flex items-center justify-between font-bold text-xs mb-1">
             <span class="flex items-center gap-1.5">
-              <i data-lucide="${crit.met ? 'check' : 'x'}" class="w-3.5 h-3.5 ${crit.met ? 'text-emerald-400' : 'text-red-400'}"></i>
-              ${crit.condition}
+              <i data-lucide="${crit.met ? 'check' : 'x'}" class="w-3.5 h-3.5 ${crit.met ? 'text-nord-14' : 'text-nord-11'}"></i>
+              ${escapeHTML(crit.condition)}
             </span>
-            <span class="text-[10px] uppercase px-1.5 py-0.5 rounded ${crit.met ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}">${crit.met ? 'MET' : 'UNMET'}</span>
+            <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded ${crit.met ? 'bg-nord-14/20 text-nord-14' : 'bg-nord-11/20 text-nord-11'}">${crit.met ? 'MET' : 'UNMET'}</span>
           </div>
-          <p class="text-[11px] text-slate-400 pl-5">${crit.evidence || 'No specific evidence string.'}</p>
+          <p class="text-[11px] opacity-80 pl-5 leading-relaxed">${escapeHTML(crit.evidence || 'No specific evidence string.')}</p>
         `;
         modalCriteriaList.appendChild(critDiv);
       });
     }
 
-    // Specs List
     modalSpecsList.innerHTML = '';
     const specs = item.specs || [];
     if (specs.length === 0) {
-      modalSpecsList.innerHTML = '<p class="text-slate-500 text-xs col-span-2">No structured specs table items parsed.</p>';
+      modalSpecsList.innerHTML = '<p class="text-nord-3 text-xs col-span-2">No specs parsed.</p>';
     } else {
       specs.forEach(s => {
         const specItem = document.createElement('div');
-        specItem.className = 'text-slate-300 truncate';
+        specItem.className = 'text-nord-4 truncate';
         specItem.textContent = `• ${s}`;
         specItem.title = s;
         modalSpecsList.appendChild(specItem);
@@ -493,7 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // CAPTCHA Modal & Interactive Drag Solver
+  // 12. CAPTCHA Canvas Drag Solver
   function showCaptchaModal(screenshotB64, message) {
     if (!screenshotB64) return;
     captchaModal.classList.remove('hidden');
@@ -515,7 +751,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   closeCaptchaModal.addEventListener('click', hideCaptchaModal);
 
-  // Mouse interaction on CAPTCHA Canvas
   captchaCanvas.addEventListener('mousedown', (e) => {
     const rect = captchaCanvas.getBoundingClientRect();
     const scaleX = captchaCanvas.width / rect.width;
@@ -566,7 +801,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (err) {
       captchaLoadingOverlay.classList.add('hidden');
-      console.error('Error submitting captcha action:', err);
     }
   });
 
@@ -576,10 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await fetch('/api/captcha/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          search_id: currentSearchId,
-          action: 'resolve'
-        })
+        body: JSON.stringify({ search_id: currentSearchId, action: 'resolve' })
       });
       hideCaptchaModal();
     } catch (err) {
@@ -587,13 +818,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // History Functions
+  // 13. History Management
   async function loadHistoryCount() {
     try {
       const res = await fetch('/api/history');
       const data = await res.json();
-      const count = (data.searches || []).length;
-      historyBadgeCount.textContent = count;
+      historyBadgeCount.textContent = (data.searches || []).length;
     } catch (e) {}
   }
   loadHistoryCount();
@@ -616,40 +846,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
       searches.forEach(search => {
         const card = document.createElement('div');
-        card.className = 'bg-dark-card border border-dark-border rounded-2xl p-5 shadow-lg flex flex-col justify-between hover:border-slate-700 transition relative';
+        card.className = 'theme-bg-card border theme-border rounded-3xl p-5 shadow-lg flex flex-col justify-between hover:border-nord-8 transition relative';
 
         const dateStr = new Date(search.timestamp).toLocaleString();
         
         card.innerHTML = `
           <div>
             <div class="flex items-center justify-between mb-2">
-              <span class="text-[11px] font-mono text-slate-400">${dateStr}</span>
+              <span class="text-[11px] font-mono text-nord-3">${dateStr}</span>
               <span class="text-xs font-bold px-2 py-0.5 rounded-full ${
                 search.status === 'completed' 
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                  ? 'bg-nord-14/15 text-nord-14 border border-nord-14/30' 
+                  : 'bg-nord-13/15 text-nord-13 border border-nord-13/30'
               }">${search.status}</span>
             </div>
 
-            <h3 class="font-bold text-white text-base mb-1.5 line-clamp-1">${search.search_term}</h3>
+            <h3 class="font-extrabold text-nord-6 text-base mb-1.5 line-clamp-1">${escapeHTML(search.search_term)}</h3>
             
-            <p class="text-xs text-slate-400 font-mono line-clamp-2 bg-slate-900/60 p-2 rounded-lg border border-dark-border mb-4">
-              ${search.conditions}
+            <p class="text-xs text-nord-4 opacity-80 font-mono line-clamp-2 bg-nord-0/60 p-2.5 rounded-xl border theme-border mb-4">
+              ${escapeHTML(search.conditions)}
             </p>
 
             <div class="flex items-center gap-3 text-xs mb-4">
-              <span class="text-slate-400">Found: <strong class="text-white font-mono">${search.total_found}</strong></span>
-              <span class="text-slate-400">Matches: <strong class="text-emerald-400 font-mono">${search.total_matched}</strong></span>
-              <span class="text-slate-500 font-mono uppercase">${search.currency} (${search.ship_country})</span>
+              <span class="text-nord-4">Found: <strong class="text-nord-6 font-mono">${search.total_found}</strong></span>
+              <span class="text-nord-4">Matches: <strong class="text-nord-14 font-mono">${search.total_matched}</strong></span>
+              <span class="text-nord-3 font-mono uppercase">${search.currency} (${search.ship_country})</span>
             </div>
           </div>
 
-          <div class="flex items-center justify-between pt-3 border-t border-dark-border gap-2">
-            <button class="delete-history-btn text-xs px-2.5 py-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition border border-red-500/20 flex items-center gap-1" data-id="${search.id}">
+          <div class="flex items-center justify-between pt-3 border-t theme-border gap-2">
+            <button class="delete-history-btn text-xs px-3 py-1.5 rounded-xl text-nord-11 hover:bg-nord-11/10 transition border border-nord-11/25 flex items-center gap-1" data-id="${search.id}">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               <span>Delete</span>
             </button>
-            <button class="view-history-btn text-xs px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium transition flex items-center gap-1 shadow-md shadow-brand-500/10" data-id="${search.id}">
+            <button class="view-history-btn text-xs px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-nord-10 to-nord-8 text-nord-0 font-bold transition flex items-center gap-1 shadow-md shadow-nord-8/15" data-id="${search.id}">
               <i data-lucide="eye" class="w-3.5 h-3.5"></i>
               <span>View Results</span>
             </button>
@@ -661,7 +891,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (window.lucide) lucide.createIcons();
 
-      // Attach history listeners
       document.querySelectorAll('.view-history-btn').forEach(btn => {
         btn.addEventListener('click', () => viewHistorySearch(btn.dataset.id));
       });
@@ -683,13 +912,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const search = await res.json();
       if (!search) return;
 
-      // Populate Search Form with past inputs
       searchTermInput.value = search.search_term || '';
-      conditionsInput.value = search.conditions || '';
-      shipCountryInput.value = search.ship_country || 'AU';
-      currencyInput.value = search.currency || 'AUD';
+      shipCountrySelect.value = search.ship_country || 'AU';
+      currencySelect.value = search.currency || 'AUD';
 
-      // Switch to Search tab & populate products
+      // Parse conditions into rows
+      if (search.conditions) {
+        const rawLines = search.conditions.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
+        conditionsList = rawLines.length > 0 ? rawLines : [''];
+        renderConditions();
+      }
+
       navSearchTab.click();
       activeProducts = search.items || [];
       renderProducts();

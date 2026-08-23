@@ -1,57 +1,108 @@
-/* Custom styles for AliExpress AI Hunter */
+/* Nord Color Palette & Theme Engine */
 
+:root {
+  /* Nord Light Theme */
+  --bg-primary: #ECEFF4;
+  --bg-secondary: #E5E9F0;
+  --bg-card: #FFFFFF;
+  --bg-input: #F8FAFC;
+  --border-color: #D8DEE9;
+  --text-primary: #2E3440;
+  --text-secondary: #4C566A;
+  --text-muted: #64748B;
+  --accent-primary: #5E81AC;
+  --accent-hover: #81A1C1;
+  --accent-frost: #88C0D0;
+  --success: #A3BE8C;
+  --danger: #BF616A;
+  --warning: #EBCB8B;
+  --shadow-color: rgba(46, 52, 64, 0.08);
+}
+
+html.dark {
+  /* Official Arctic Nord Dark Palette */
+  --bg-primary: #2E3440;    /* nord0 */
+  --bg-secondary: #242933;  /* deep polar */
+  --bg-card: #3B4252;       /* nord1 */
+  --bg-input: #2E3440;      /* nord0 */
+  --border-color: #434C5E;  /* nord2 */
+  --text-primary: #ECEFF4;  /* nord6 */
+  --text-secondary: #D8DEE9;/* nord4 */
+  --text-muted: #4C566A;    /* nord3 */
+  --accent-primary: #88C0D0;/* nord8 */
+  --accent-hover: #81A1C1;  /* nord9 */
+  --accent-frost: #8FBCBB;  /* nord7 */
+  --success: #A3BE8C;       /* nord14 */
+  --danger: #BF616A;        /* nord11 */
+  --warning: #EBCB8B;       /* nord13 */
+  --shadow-color: rgba(0, 0, 0, 0.35);
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-
 ::-webkit-scrollbar-track {
-  background: #0b0f19;
+  background: var(--bg-secondary);
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #1f2937;
+  background: var(--border-color);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
+  background: var(--text-muted);
+}
+
+/* Theme Elements */
+.theme-bg-card {
+  background-color: var(--bg-card);
+  border-color: var(--border-color);
+}
+.theme-bg-input {
+  background-color: var(--bg-input);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+.theme-border {
+  border-color: var(--border-color);
 }
 
 .nav-btn.active {
-  background-color: rgba(255, 71, 71, 0.12);
-  color: #ff4747;
-  border: 1px solid rgba(255, 71, 71, 0.25);
+  background-color: rgba(136, 192, 208, 0.15);
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
 }
 
 .filter-tab-btn.active {
-  background-color: #1f2937;
-  color: #ffffff;
-  border: 1px solid #374151;
-}
-
-/* Animations */
-@keyframes pulse-glow {
-  0%, 100% {
-    box-shadow: 0 0 15px rgba(255, 71, 71, 0.2);
-  }
-  50% {
-    box-shadow: 0 0 25px rgba(255, 71, 71, 0.4);
-  }
-}
-
-.glow-active {
-  animation: pulse-glow 2s infinite ease-in-out;
+  background-color: var(--border-color);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-primary);
 }
 
 .badge-match {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: rgba(163, 190, 140, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(163, 190, 140, 0.35);
 }
 
 .badge-fail {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(191, 97, 106, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(191, 97, 106, 0.35);
+}
+
+/* Suggestion Dropdown */
+.suggestion-item {
+  transition: background-color 0.1s ease;
+}
+.suggestion-item:hover, .suggestion-item.selected {
+  background-color: rgba(136, 192, 208, 0.15);
+  color: var(--accent-primary);
 }
