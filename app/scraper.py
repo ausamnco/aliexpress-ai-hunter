@@ -39,6 +39,7 @@ class ScraperSession:
         self.active_page: Optional[Page] = None
         self.active_context: Optional[BrowserContext] = None
         self.challenge_url: Optional[str] = None
+        self.current_search_url: Optional[str] = None
         self.captcha_event = asyncio.Event()
         self.captcha_resume_event = asyncio.Event()
         self.resume_action = "continue_remaining"
@@ -71,13 +72,11 @@ async def handle_captcha_interaction(
     context = session.active_context
     page = session.active_page
 
-    if action in ["resolve", "check", "sync_cookie", "sync_url"]:
+    if action in ["resolve", "check", "done", "sync_cookie", "sync_url"]:
         cookies_to_add = []
 
-        # 1. Parse cookie string if provided
         if cookie_str:
             clean_str = cookie_str.strip()
-            # Handle document.cookie format: "name=value; name2=value2"
             pairs = [p.strip() for p in clean_str.split(";") if p.strip()]
             for p in pairs:
                 if "=" in p:
@@ -92,7 +91,6 @@ async def handle_captcha_interaction(
                             "path": "/"
                         })
 
-        # 2. Parse redirect_url if provided
         if redirect_url and "aliexpress.com" in redirect_url:
             parsed = urllib.parse.urlparse(redirect_url)
             params = urllib.parse.parse_qs(parsed.query)
@@ -111,24 +109,26 @@ async def handle_captcha_interaction(
             except Exception as e:
                 logger.warning(f"Error adding cookies to context: {e}")
 
-        # Check page status
+        # Check page status by reloading or navigating to target search url
         try:
-            if redirect_url and "aliexpress.com" in redirect_url and "punish" not in redirect_url:
-                logger.info(f"Navigating Playwright to verified redirect URL: {redirect_url}")
-                await page.goto(redirect_url, wait_until="domcontentloaded", timeout=20000)
-            elif "punish" in page.url:
-                await page.reload(wait_until="domcontentloaded", timeout=12000)
-            await asyncio.sleep(1.5)
+            target = session.current_search_url or page.url
+            logger.info(f"Reloading Playwright page to check verification: {target}")
+            await page.goto(target, wait_until="domcontentloaded", timeout=25000)
+            await asyncio.sleep(2.0)
         except Exception as e:
             logger.warning(f"Error refreshing verification status: {e}")
 
-        resolved = "punish" not in page.url
-        if resolved:
+        is_still_punish = "punish" in page.url or (await page.query_selector("#nc_1_n1z, .btn_slide") is not None)
+        if not is_still_punish:
             session.captcha_event.set()
             await session.emit_event("captcha_cleared", {"message": "Verification passed!"})
             return {"success": True, "resolved": True}
         else:
-            return {"success": True, "resolved": False, "url": page.url}
+            return {
+                "success": True, 
+                "resolved": False, 
+                "message": "Verification is still showing on AliExpress. Please ensure you completed the slider in the tab."
+            }
 
     elif action == "cancel":
         session.captcha_event.set()
@@ -260,6 +260,8 @@ async def run_scraper_job(
                 await session.emit_event("query_started", {"query": query, "query_index": query_index + 1})
 
                 search_url = f"https://www.aliexpress.com/wholesale?SearchText={urllib.parse.quote_plus(query)}&shipCountry={ship_country}"
+                session.current_search_url = search_url
+
                 try:
                     await page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
                     await asyncio.sleep(2.0)
@@ -269,19 +271,18 @@ async def run_scraper_job(
                 # Check for verification challenge
                 is_punish = "punish" in page.url or (await page.query_selector("#nc_1_n1z, .btn_slide") is not None)
                 if is_punish:
-                    logger.info("Verification challenge detected! Presenting live AliExpress page to user...")
+                    logger.info("Verification challenge detected! Prompting user to complete verification in tab...")
                     challenge_url = page.url
                     if "punish" not in challenge_url:
                         challenge_url = search_url
 
                     session.challenge_url = challenge_url
-                    session.stage = "AliExpress Verification Required. Please complete the challenge."
+                    session.stage = "AliExpress Verification Required. Please complete the challenge in the opened tab."
                     session.captcha_event.clear()
 
                     await session.emit_event("captcha_required", {
                         "challenge_url": challenge_url,
-                        "proxy_url": f"/api/captcha/live/{search_id}",
-                        "message": "AliExpress verification challenge required. Please interact with the challenge below or open in a new tab."
+                        "message": "AliExpress verification challenge required. Please click to open the challenge on AliExpress."
                     })
 
                     # Poll and wait up to 300s for user to complete verification

@@ -1,4 +1,4 @@
-// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Auto-Closing Verify Tab)
+// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Direct AliExpress Verification Flow)
 
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
@@ -21,7 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentTheme = localStorage.getItem('app_theme') || 'dark';
   let activeEventSource = null;
   let currentSearchId = null;
-  let currentVerifyUrl = null;
+  let currentChallengeUrl = null;
+  let activeVerifyTab = null;
+  let tabWatcherInterval = null;
   let activeProducts = [];
   let activeFilter = 'all';
   let searchTermsList = [];
@@ -92,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const countExcluded = document.getElementById('count-excluded');
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
 
-  // Auto-Closing Verification Tab Modal Elements
+  // Verification Modal Elements
   const captchaModal = document.getElementById('captcha-modal');
   const captchaSolveView = document.getElementById('captcha-solve-view');
   const captchaFailureView = document.getElementById('captcha-failure-view');
@@ -102,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const continueRemainingBtn = document.getElementById('continue-remaining-btn');
   const cancelCaptchaBtn = document.getElementById('cancel-captcha-btn');
   const openVerifyTabBtn = document.getElementById('open-verify-tab-btn');
+  const doneVerifyBtn = document.getElementById('done-verify-btn');
   const captchaTabWaitingStatus = document.getElementById('captcha-tab-waiting-status');
 
   // Detail Modal Elements
@@ -637,7 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
 
       case 'captcha_required':
-        showVerifyTabModal(data.verify_url || `/api/captcha/verify/${currentSearchId}`);
+        showDirectVerificationModal(data.challenge_url);
         break;
 
       case 'captcha_cleared':
@@ -829,12 +832,14 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // 13. Auto-Closing Verification Tab Flow Handlers
-  function showVerifyTabModal(verifyUrl) {
-    currentVerifyUrl = verifyUrl;
+  // 13. Direct AliExpress Verification Flow Handlers
+  function showDirectVerificationModal(challengeUrl) {
+    currentChallengeUrl = challengeUrl;
     captchaSolveView.classList.remove('hidden');
     captchaFailureView.classList.add('hidden');
     captchaTabWaitingStatus.classList.add('hidden');
+    doneVerifyBtn.classList.add('hidden');
+    openVerifyTabBtn.classList.remove('hidden');
     captchaModal.classList.remove('hidden');
     captchaModal.classList.add('flex');
   }
@@ -864,19 +869,59 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideCaptchaModal() {
     captchaModal.classList.add('hidden');
     captchaModal.classList.remove('flex');
-    captchaTabWaitingStatus.classList.add('hidden');
+    if (tabWatcherInterval) {
+      clearInterval(tabWatcherInterval);
+      tabWatcherInterval = null;
+    }
   }
 
   openVerifyTabBtn.addEventListener('click', () => {
-    const url = currentVerifyUrl || `/api/captcha/verify/${currentSearchId}`;
-    window.open(url, '_blank');
+    if (!currentChallengeUrl) return;
+    activeVerifyTab = window.open(currentChallengeUrl, '_blank');
+    
     captchaTabWaitingStatus.classList.remove('hidden');
+    doneVerifyBtn.classList.remove('hidden');
+    openVerifyTabBtn.classList.add('hidden');
+
+    // Auto-detect when the user finishes and closes the AliExpress tab
+    if (tabWatcherInterval) clearInterval(tabWatcherInterval);
+    tabWatcherInterval = setInterval(() => {
+      if (activeVerifyTab && activeVerifyTab.closed) {
+        clearInterval(tabWatcherInterval);
+        tabWatcherInterval = null;
+        // Trigger session verification
+        doneVerifyBtn.click();
+      }
+    }, 1000);
   });
 
-  // Listen for message from the auto-closing verification tab
-  window.addEventListener('message', async (e) => {
-    if (e.data && e.data.type === 'verification_completed') {
-      hideCaptchaModal();
+  doneVerifyBtn.addEventListener('click', async () => {
+    if (!currentSearchId) return;
+    doneVerifyBtn.disabled = true;
+    doneVerifyBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Validating with AliExpress...</span>`;
+    if (window.lucide) lucide.createIcons();
+
+    try {
+      const res = await fetch('/api/captcha/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search_id: currentSearchId, action: 'done' })
+      });
+      const data = await res.json();
+
+      if (data.resolved) {
+        hideCaptchaModal();
+      } else {
+        alert(data.message || 'Verification is still showing on AliExpress. Please ensure you completed the slider in the tab.');
+        doneVerifyBtn.disabled = false;
+        doneVerifyBtn.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4"></i><span>✅ I've Completed Verification / Resume Search</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
+    } catch (err) {
+      alert('Error verifying session: ' + err.message);
+      doneVerifyBtn.disabled = false;
+      doneVerifyBtn.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4"></i><span>✅ I've Completed Verification / Resume Search</span>`;
+      if (window.lucide) lucide.createIcons();
     }
   });
 

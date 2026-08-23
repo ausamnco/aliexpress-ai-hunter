@@ -437,7 +437,7 @@
     </div>
   </div>
 
-  <!-- MODAL: DEDICATED AUTO-CLOSING VERIFICATION TAB FLOW -->
+  <!-- MODAL: DEDICATED VERIFICATION ON ALIEXPRESS MODAL -->
   <div id="captcha-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4">
     <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-lg w-full p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
       
@@ -449,7 +449,7 @@
           </div>
           <div>
             <h3 class="font-extrabold text-nord-6 text-base">AliExpress Verification Required</h3>
-            <p class="text-xs text-nord-4 opacity-85 mt-0.5">AliExpress requires a quick slide puzzle to be completed.</p>
+            <p class="text-xs text-nord-4 opacity-85 mt-0.5">AliExpress requires a quick slide puzzle to verify.</p>
           </div>
         </div>
 
@@ -457,26 +457,35 @@
         <div class="bg-nord-0/60 p-4 rounded-2xl border theme-border text-xs space-y-2.5 leading-relaxed">
           <div class="font-bold text-nord-5 flex items-center gap-1.5">
             <i data-lucide="sparkles" class="w-4 h-4 text-nord-8"></i>
-            How it works:
+            Quick Steps:
           </div>
           <ol class="list-decimal list-inside space-y-1.5 text-nord-4 pl-1">
-            <li>Click the button below to <strong>open the verification tab</strong>.</li>
-            <li>Slide the puzzle bar on the page to complete verification.</li>
-            <li>Once completed, <strong>the tab will automatically close</strong> and return you here to resume searching.</li>
+            <li>Click <strong>"Open Verification on AliExpress"</strong> below.</li>
+            <li>Drag the verification slider to complete the challenge.</li>
+            <li>Once AliExpress loads, <strong>close the tab</strong> (or click Resume below) to continue your search!</li>
           </ol>
         </div>
 
-        <!-- Waiting Status Indicator (Appears after clicking Open) -->
-        <div id="captcha-tab-waiting-status" class="hidden p-3.5 rounded-2xl bg-nord-8/10 border border-nord-8/25 text-xs text-nord-8 flex items-center gap-2.5">
-          <i data-lucide="loader-2" class="w-4 h-4 animate-spin flex-shrink-0"></i>
-          <span>Verification tab opened! Complete the slider in the new tab to continue...</span>
+        <!-- Waiting Status (Shows after clicking Open) -->
+        <div id="captcha-tab-waiting-status" class="hidden p-3.5 rounded-2xl bg-nord-8/10 border border-nord-8/25 text-xs text-nord-8 space-y-1">
+          <div class="flex items-center gap-2 font-bold">
+            <i data-lucide="loader-2" class="w-4 h-4 animate-spin flex-shrink-0"></i>
+            <span>AliExpress Tab Opened!</span>
+          </div>
+          <p class="text-[11px] opacity-90 pl-6">Complete the slider on AliExpress. When finished, closing the tab automatically resumes your search!</p>
         </div>
 
         <div class="flex flex-col gap-2.5 pt-2">
           <!-- Primary Action Button -->
           <button type="button" id="open-verify-tab-btn" class="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 text-nord-0 font-extrabold text-sm shadow-xl shadow-nord-8/20 flex items-center justify-center gap-2 transition transform active:scale-[0.98]">
             <i data-lucide="external-link" class="w-4 h-4"></i>
-            <span>Open Verification Tab &amp; Solve</span>
+            <span>Open Verification on AliExpress</span>
+          </button>
+
+          <!-- Done Button (Revealed after opening) -->
+          <button type="button" id="done-verify-btn" class="hidden w-full py-3 px-4 rounded-2xl bg-nord-14 hover:bg-emerald-400 text-nord-0 font-extrabold text-xs shadow-lg shadow-nord-14/20 flex items-center justify-center gap-2 transition">
+            <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+            <span>✅ I've Completed Verification / Resume Search</span>
           </button>
 
           <button type="button" id="cancel-captcha-btn" class="w-full py-2.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition">
