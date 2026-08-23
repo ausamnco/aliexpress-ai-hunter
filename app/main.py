@@ -66,7 +66,6 @@ async def get_search_suggestions(q: str = Query("", min_length=1)):
     clean_q = q.strip()
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            # Query Google Search Suggestions (ultra-fast, generic spelling & product autocompletion)
             url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={httpx.URL(clean_q)}"
             resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
             if resp.status_code == 200:
@@ -80,7 +79,6 @@ async def get_search_suggestions(q: str = Query("", min_length=1)):
 
 @app.post("/api/search")
 async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
-    # Support either single search_term or list of search_terms
     terms = req.search_terms or []
     if req.search_term and req.search_term.strip() and req.search_term.strip() not in terms:
         terms.insert(0, req.search_term.strip())
@@ -168,34 +166,121 @@ async def perform_captcha_action(req: CaptchaActionRequest):
     )
     return result
 
-@app.get("/api/captcha/live/{search_id}", response_class=HTMLResponse)
-async def get_live_captcha_page(search_id: str):
+@app.get("/api/captcha/verify/{search_id}", response_class=HTMLResponse)
+async def get_verify_tab_page(search_id: str):
     session = scraper.sessions.get(search_id)
     if not session or not session.active_page:
         raise HTTPException(status_code=404, detail="Active search session or browser page not found.")
 
     try:
         page = session.active_page
-        content = await page.content()
+        challenge_url = page.url
+        raw_content = await page.content()
+
+        base_tag = f'<base href="{challenge_url}">'
         
-        base_tag = f'<base href="{page.url}">'
-        inject_script = """
+        bridge_script = """
         <script>
-            // Relay verification completion to parent app
-            setInterval(function() {
-                var el = document.querySelector('.nc-lang-cnt, #nc_1__scale_text, .btn_slide');
-                if (el && (el.innerText.toLowerCase().indexOf('pass') !== -1 || el.innerText.toLowerCase().indexOf('success') !== -1)) {
-                    if (window.parent) window.parent.postMessage({ type: 'aliexpress_captcha_passed' }, '*');
+        (function() {
+            var searchId = "__SEARCH_ID__";
+            var completed = false;
+
+            async function notifyComplete(extraCookies) {
+                if (completed) return;
+                completed = true;
+                
+                var cookies = extraCookies || document.cookie || "";
+                var currentUrl = window.location.href;
+
+                var banner = document.getElementById("ai-verify-banner");
+                if (banner) {
+                    banner.style.background = "#A3BE8C";
+                    banner.style.color = "#2E3440";
+                    banner.innerHTML = "<strong>✅ Verification Complete! Closing tab and returning to search...</strong>";
                 }
-            }, 1000);
+
+                try {
+                    await fetch('/api/captcha/action', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            search_id: searchId,
+                            action: 'sync_cookie',
+                            cookie_str: cookies,
+                            redirect_url: currentUrl
+                        })
+                    });
+                } catch(e) {}
+
+                if (window.opener) {
+                    try {
+                        window.opener.postMessage({
+                            type: 'verification_completed',
+                            search_id: searchId,
+                            cookie_str: cookies,
+                            redirect_url: currentUrl
+                        }, '*');
+                    } catch(e) {}
+                }
+
+                setTimeout(function() {
+                    window.close();
+                }, 600);
+            }
+
+            setInterval(function() {
+                if (completed) return;
+
+                var textEl = document.querySelector('.nc-lang-cnt, #nc_1__scale_text, .btn_slide');
+                if (textEl) {
+                    var txt = (textEl.innerText || "").toLowerCase();
+                    if (txt.indexOf('pass') !== -1 || txt.indexOf('success') !== -1 || txt.indexOf('verified') !== -1) {
+                        notifyComplete();
+                    }
+                }
+
+                if (document.cookie && document.cookie.indexOf('x5sec=') !== -1) {
+                    notifyComplete();
+                }
+            }, 800);
+
+            window.__ai_hunter_complete = function() {
+                notifyComplete();
+            };
+        })();
         </script>
+        """.replace("__SEARCH_ID__", search_id)
+
+        header_banner = """
+        <div id="ai-verify-banner" style="position: sticky; top: 0; left: 0; right: 0; z-index: 999999; background: #3B4252; color: #ECEFF4; padding: 12px 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #88C0D0; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🛡️</span>
+            <div>
+              <div style="font-weight: bold; font-size: 14px;">AliExpress Verification Required</div>
+              <div style="font-size: 12px; opacity: 0.85;">Please slide the verification bar below. Once passed, this tab will automatically close and resume your search.</div>
+            </div>
+          </div>
+          <button onclick="window.__ai_hunter_complete()" style="background: #88C0D0; color: #2E3440; font-weight: bold; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+            I've Solved It / Done
+          </button>
+        </div>
         """
-        
+
+        content = raw_content
         if "<head>" in content:
-            content = content.replace("<head>", f"<head>\n{base_tag}\n{inject_script}", 1)
+            content = content.replace("<head>", f"<head>\n{base_tag}\n{bridge_script}", 1)
         elif "<html" in content:
-            content = content.replace(">", f">\n<head>{base_tag}\n{inject_script}</head>", 1)
-            
+            content = content.replace(">", f">\n<head>{base_tag}\n{bridge_script}</head>", 1)
+
+        if "<body>" in content:
+            content = content.replace("<body>", f"<body>\n{header_banner}", 1)
+        elif "<body " in content:
+            idx = content.find(">", content.find("<body"))
+            if idx != -1:
+                content = content[:idx+1] + "\n" + header_banner + content[idx+1:]
+        else:
+            content = header_banner + "\n" + content
+
         return HTMLResponse(
             content=content,
             headers={
@@ -204,7 +289,7 @@ async def get_live_captcha_page(search_id: str):
             }
         )
     except Exception as e:
-        logger.error(f"Error serving live AliExpress challenge page: {e}")
+        logger.error(f"Error serving verification tab: {e}")
         return HTMLResponse(content=f"<h3>Error loading AliExpress challenge:</h3><p>{str(e)}</p>")
 
 @app.get("/api/history")

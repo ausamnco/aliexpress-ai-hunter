@@ -437,73 +437,50 @@
     </div>
   </div>
 
-  <!-- MODAL: ACTUAL LIVE ALIEXPRESS VERIFICATION PAGE & RECOVERY -->
+  <!-- MODAL: DEDICATED AUTO-CLOSING VERIFICATION TAB FLOW -->
   <div id="captcha-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="theme-bg-card border border-nord-13/40 rounded-3xl max-w-3xl w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[94vh]">
+    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-lg w-full p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
       
-      <!-- Live Verification Page View -->
-      <div id="captcha-solve-view" class="flex flex-col flex-1 min-h-0">
-        <div class="flex items-center justify-between pb-3 border-b theme-border mb-3">
-          <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-2xl bg-nord-13/20 text-nord-13 flex items-center justify-center border border-nord-13/30">
-              <i data-lucide="shield-alert" class="w-5 h-5"></i>
-            </div>
-            <div>
-              <h3 class="font-bold text-nord-6 text-base">AliExpress Verification Challenge</h3>
-              <p class="text-xs text-nord-13 opacity-90">Complete the verification below or open it directly on AliExpress in a new tab.</p>
-            </div>
+      <!-- Prompt to Open Verification Tab -->
+      <div id="captcha-solve-view" class="space-y-5">
+        <div class="flex items-center gap-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-nord-13/20 text-nord-13 flex items-center justify-center border border-nord-13/30 flex-shrink-0">
+            <i data-lucide="shield-alert" class="w-6 h-6"></i>
           </div>
-
-          <div class="flex items-center gap-2">
-            <a id="open-external-captcha-btn" href="#" target="_blank" class="px-3 py-1.5 rounded-xl bg-nord-8 hover:bg-nord-7 text-nord-0 text-xs font-bold flex items-center gap-1.5 transition shadow-sm" title="Open on AliExpress directly">
-              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
-              <span>Open in New Tab</span>
-            </a>
-            <button id="reload-captcha-frame-btn" class="p-2 rounded-xl text-nord-4 hover:text-nord-6 bg-nord-2 transition" title="Reload Frame">
-              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-            </button>
-            <button id="close-captcha-modal" class="p-2 text-nord-4 hover:text-nord-6 transition">
-              <i data-lucide="x" class="w-5 h-5"></i>
-            </button>
+          <div>
+            <h3 class="font-extrabold text-nord-6 text-base">AliExpress Verification Required</h3>
+            <p class="text-xs text-nord-4 opacity-85 mt-0.5">AliExpress requires a quick slide puzzle to be completed.</p>
           </div>
         </div>
 
-        <!-- Embedded Live Frame -->
-        <div class="relative bg-white rounded-2xl overflow-hidden border theme-border flex-1 min-h-[300px] flex flex-col">
-          <iframe id="captcha-live-iframe" class="w-full h-full min-h-[300px] border-0 rounded-2xl bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
-          
-          <div id="captcha-loading-overlay" class="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-nord-4 gap-2 hidden">
-            <i data-lucide="loader-2" class="w-7 h-7 animate-spin text-nord-13"></i>
-            <span class="text-xs font-semibold">Validating session with AliExpress...</span>
+        <!-- Instructions Box -->
+        <div class="bg-nord-0/60 p-4 rounded-2xl border theme-border text-xs space-y-2.5 leading-relaxed">
+          <div class="font-bold text-nord-5 flex items-center gap-1.5">
+            <i data-lucide="sparkles" class="w-4 h-4 text-nord-8"></i>
+            How it works:
           </div>
+          <ol class="list-decimal list-inside space-y-1.5 text-nord-4 pl-1">
+            <li>Click the button below to <strong>open the verification tab</strong>.</li>
+            <li>Slide the puzzle bar on the page to complete verification.</li>
+            <li>Once completed, <strong>the tab will automatically close</strong> and return you here to resume searching.</li>
+          </ol>
         </div>
 
-        <!-- 1-Click Sync for External Tab Verification -->
-        <div class="mt-3 bg-nord-0/70 p-3 rounded-2xl border theme-border space-y-1.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-nord-4 flex items-center gap-1.5">
-              <i data-lucide="link-2" class="w-3.5 h-3.5 text-nord-8"></i>
-              <span>Solved in the external tab?</span>
-            </span>
-            <span class="text-[10px] text-nord-8 font-mono">1-Click Session Relay</span>
-          </div>
-          <p class="text-[11px] text-nord-3">Paste the redirected page URL from your tab here, or leave empty if using cookies:</p>
-          <div class="flex gap-2">
-            <input type="text" id="captcha-sync-input" placeholder="Paste redirected AliExpress URL (e.g. https://www.aliexpress.com/wholesale?SearchText=...)" class="flex-1 theme-bg-input border theme-border rounded-xl px-3 py-1.5 text-xs text-nord-5 placeholder-nord-3 focus:outline-none focus:border-nord-8 font-mono">
-            <button type="button" id="apply-sync-btn" class="px-4 py-1.5 rounded-xl bg-nord-8 hover:bg-nord-7 text-nord-0 font-bold text-xs transition flex items-center gap-1">
-              <i data-lucide="zap" class="w-3.5 h-3.5"></i>
-              <span>Sync & Resume</span>
-            </button>
-          </div>
+        <!-- Waiting Status Indicator (Appears after clicking Open) -->
+        <div id="captcha-tab-waiting-status" class="hidden p-3.5 rounded-2xl bg-nord-8/10 border border-nord-8/25 text-xs text-nord-8 flex items-center gap-2.5">
+          <i data-lucide="loader-2" class="w-4 h-4 animate-spin flex-shrink-0"></i>
+          <span>Verification tab opened! Complete the slider in the new tab to continue...</span>
         </div>
 
-        <div class="flex items-center justify-between mt-3 pt-3 border-t theme-border">
-          <button id="cancel-captcha-btn" class="px-4 py-2 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/60 border theme-border transition">
-            Cancel Search
+        <div class="flex flex-col gap-2.5 pt-2">
+          <!-- Primary Action Button -->
+          <button type="button" id="open-verify-tab-btn" class="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 text-nord-0 font-extrabold text-sm shadow-xl shadow-nord-8/20 flex items-center justify-center gap-2 transition transform active:scale-[0.98]">
+            <i data-lucide="external-link" class="w-4 h-4"></i>
+            <span>Open Verification Tab &amp; Solve</span>
           </button>
-          <button id="resume-captcha-btn" class="px-5 py-2 rounded-xl text-xs font-bold text-nord-0 bg-nord-13 hover:bg-amber-300 transition flex items-center gap-2 shadow-lg shadow-nord-13/20">
-            <i data-lucide="check-circle" class="w-4 h-4"></i>
-            <span>I've Verified in Frame / Continue</span>
+
+          <button type="button" id="cancel-captcha-btn" class="w-full py-2.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition">
+            Cancel Search
           </button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Live AliExpress Challenge)
+// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Auto-Closing Verify Tab)
 
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentTheme = localStorage.getItem('app_theme') || 'dark';
   let activeEventSource = null;
   let currentSearchId = null;
+  let currentVerifyUrl = null;
   let activeProducts = [];
   let activeFilter = 'all';
   let searchTermsList = [];
@@ -91,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const countExcluded = document.getElementById('count-excluded');
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
 
-  // Live AliExpress Challenge Modal Elements
+  // Auto-Closing Verification Tab Modal Elements
   const captchaModal = document.getElementById('captcha-modal');
   const captchaSolveView = document.getElementById('captcha-solve-view');
   const captchaFailureView = document.getElementById('captcha-failure-view');
@@ -99,13 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const remainingTermsList = document.getElementById('remaining-terms-list');
   const retryCaptchaBtn = document.getElementById('retry-captcha-btn');
   const continueRemainingBtn = document.getElementById('continue-remaining-btn');
-  const closeCaptchaModal = document.getElementById('close-captcha-modal');
   const cancelCaptchaBtn = document.getElementById('cancel-captcha-btn');
-  const captchaLiveIframe = document.getElementById('captcha-live-iframe');
-  const openExternalCaptchaBtn = document.getElementById('open-external-captcha-btn');
-  const reloadCaptchaFrameBtn = document.getElementById('reload-captcha-frame-btn');
-  const captchaLoadingOverlay = document.getElementById('captcha-loading-overlay');
-  const resumeCaptchaBtn = document.getElementById('resume-captcha-btn');
+  const openVerifyTabBtn = document.getElementById('open-verify-tab-btn');
+  const captchaTabWaitingStatus = document.getElementById('captcha-tab-waiting-status');
 
   // Detail Modal Elements
   const productDetailModal = document.getElementById('product-detail-modal');
@@ -640,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
 
       case 'captcha_required':
-        showLiveCaptchaModal(data.proxy_url, data.challenge_url, data.message);
+        showVerifyTabModal(data.verify_url || `/api/captcha/verify/${currentSearchId}`);
         break;
 
       case 'captcha_cleared':
@@ -832,17 +829,14 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // 13. Live Actual AliExpress Verification Modal Handlers
-  function showLiveCaptchaModal(proxyUrl, challengeUrl, message) {
+  // 13. Auto-Closing Verification Tab Flow Handlers
+  function showVerifyTabModal(verifyUrl) {
+    currentVerifyUrl = verifyUrl;
     captchaSolveView.classList.remove('hidden');
     captchaFailureView.classList.add('hidden');
-    captchaLoadingOverlay.classList.add('hidden');
+    captchaTabWaitingStatus.classList.add('hidden');
     captchaModal.classList.remove('hidden');
     captchaModal.classList.add('flex');
-
-    const liveUrl = proxyUrl || `/api/captcha/live/${currentSearchId}`;
-    captchaLiveIframe.src = liveUrl;
-    openExternalCaptchaBtn.href = challengeUrl || liveUrl;
   }
 
   function showCaptchaFailureModal(message, remainingTerms) {
@@ -870,93 +864,21 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideCaptchaModal() {
     captchaModal.classList.add('hidden');
     captchaModal.classList.remove('flex');
-    captchaLiveIframe.src = 'about:blank';
+    captchaTabWaitingStatus.classList.add('hidden');
   }
 
-  closeCaptchaModal.addEventListener('click', hideCaptchaModal);
-
-  reloadCaptchaFrameBtn.addEventListener('click', () => {
-    if (captchaLiveIframe.src && captchaLiveIframe.src !== 'about:blank') {
-      captchaLiveIframe.src = captchaLiveIframe.src;
-    }
+  openVerifyTabBtn.addEventListener('click', () => {
+    const url = currentVerifyUrl || `/api/captcha/verify/${currentSearchId}`;
+    window.open(url, '_blank');
+    captchaTabWaitingStatus.classList.remove('hidden');
   });
 
-  // Listen for message from within the live challenge iframe
+  // Listen for message from the auto-closing verification tab
   window.addEventListener('message', async (e) => {
-    if (e.data && e.data.type === 'aliexpress_captcha_passed') {
-      resumeCaptchaBtn.click();
-    }
-  });
-
-  resumeCaptchaBtn.addEventListener('click', async () => {
-    if (!currentSearchId) return;
-    captchaLoadingOverlay.classList.remove('hidden');
-
-    try {
-      const res = await fetch('/api/captcha/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ search_id: currentSearchId, action: 'resolve' })
-      });
-      const data = await res.json();
-      captchaLoadingOverlay.classList.add('hidden');
-
-      if (data.resolved) {
-        hideCaptchaModal();
-      } else {
-        alert('Verification not yet completed on AliExpress. Please ensure the slider has been dragged and passed.');
-      }
-    } catch (err) {
-      captchaLoadingOverlay.classList.add('hidden');
+    if (e.data && e.data.type === 'verification_completed') {
       hideCaptchaModal();
     }
   });
-
-  const captchaSyncInput = document.getElementById('captcha-sync-input');
-  const applySyncBtn = document.getElementById('apply-sync-btn');
-
-  if (applySyncBtn && captchaSyncInput) {
-    applySyncBtn.addEventListener('click', async () => {
-      if (!currentSearchId) return;
-      const syncValue = captchaSyncInput.value.trim();
-      captchaLoadingOverlay.classList.remove('hidden');
-
-      try {
-        const isUrl = syncValue.startsWith('http://') || syncValue.startsWith('https://');
-        const payload = {
-          search_id: currentSearchId,
-          action: isUrl ? 'sync_url' : 'sync_cookie',
-          redirect_url: isUrl ? syncValue : null,
-          cookie_str: !isUrl && syncValue ? syncValue : null
-        };
-
-        const res = await fetch('/api/captcha/action', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        captchaLoadingOverlay.classList.add('hidden');
-
-        if (data.resolved) {
-          captchaSyncInput.value = '';
-          hideCaptchaModal();
-        } else {
-          alert(data.message || 'Verification could not be confirmed with the provided link. Please ensure you copied the full URL from your tab.');
-        }
-      } catch (err) {
-        captchaLoadingOverlay.classList.add('hidden');
-        alert('Error applying session sync: ' + err.message);
-      }
-    });
-
-    captchaSyncInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        applySyncBtn.click();
-      }
-    });
-  }
 
   cancelCaptchaBtn.addEventListener('click', async () => {
     if (!currentSearchId) return;
