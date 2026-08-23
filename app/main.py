@@ -1,0 +1,169 @@
+import asyncio
+import json
+import logging
+import os
+import uuid
+from typing import AsyncGenerator
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
+from app import database
+from app import scraper
+from app import ai_evaluator
+from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("aliexpress_ai_hunter")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize SQLite database schema
+    await database.init_db()
+    logger.info("Database initialized successfully.")
+    yield
+
+app = FastAPI(title="AliExpress AI Product Hunter", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# API Endpoints
+
+@app.post("/api/validate-key")
+async def validate_gemini_key(req: ValidateKeyRequest):
+    if not req.api_key or len(req.api_key.strip()) < 10:
+        return {"valid": False, "message": "API key is too short or empty."}
+    
+    is_valid = await ai_evaluator.validate_api_key(req.api_key.strip())
+    if is_valid:
+        return {"valid": True, "message": "Gemini API key is valid and connected!"}
+    else:
+        return {"valid": False, "message": "Invalid Gemini API key or quota exceeded."}
+
+@app.post("/api/search")
+async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
+    if not req.search_term.strip():
+        raise HTTPException(status_code=400, detail="Search term cannot be empty.")
+    if not req.conditions.strip():
+        raise HTTPException(status_code=400, detail="Conditions cannot be empty.")
+    if not req.gemini_api_key.strip():
+        raise HTTPException(status_code=400, detail="Gemini API Key is required.")
+
+    search_id = str(uuid.uuid4())
+    
+    # Launch scraper and AI evaluator in background
+    background_tasks.add_task(
+        scraper.run_scraper_job,
+        search_id=search_id,
+        search_term=req.search_term.strip(),
+        conditions=req.conditions.strip(),
+        gemini_api_key=req.gemini_api_key.strip(),
+        max_candidates=req.max_candidates,
+        ship_country=req.ship_country.strip().upper(),
+        currency=req.currency.strip().upper(),
+        model_name=req.model_name
+    )
+
+    return {
+        "search_id": search_id,
+        "status": "started",
+        "message": f"Search started for '{req.search_term}' with {req.max_candidates} max candidates."
+    }
+
+@app.get("/api/search/stream/{search_id}")
+async def stream_search_events(search_id: str):
+    session = scraper.sessions.get(search_id)
+    if not session:
+        # Check if it already exists in DB
+        db_record = await database.get_search_by_id(search_id)
+        if db_record:
+            async def single_event_gen():
+                yield f"data: {json.dumps({'type': 'search_completed', 'data': db_record})}\n\n"
+            return StreamingResponse(single_event_gen(), media_type="text/event-stream")
+        raise HTTPException(status_code=404, detail="Search session not found.")
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            # Yield initial status
+            yield f"data: {json.dumps({'type': 'initial_state', 'status': session.status, 'stage': session.stage, 'progress_pct': session.progress_pct})}\n\n"
+            
+            while True:
+                try:
+                    event = await asyncio.wait_for(session.event_queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    
+                    if event.get("type") in ["search_completed", "search_failed"]:
+                        break
+                except asyncio.TimeoutError:
+                    # Keepalive ping
+                    yield f": keepalive\n\n"
+                    if session.status in ["completed", "failed"]:
+                        break
+        except asyncio.CancelledError:
+            logger.info(f"Client disconnected from SSE stream for {search_id}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+@app.post("/api/captcha/action")
+async def perform_captcha_action(req: CaptchaActionRequest):
+    result = await scraper.handle_captcha_interaction(
+        search_id=req.search_id,
+        action=req.action,
+        start_x=req.start_x,
+        start_y=req.start_y,
+        end_x=req.end_x,
+        end_y=req.end_y
+    )
+    return result
+
+@app.get("/api/history")
+async def get_search_history():
+    history = await database.get_all_searches()
+    return {"searches": history}
+
+@app.get("/api/history/{search_id}")
+async def get_search_details(search_id: str):
+    details = await database.get_search_by_id(search_id)
+    if not details:
+        raise HTTPException(status_code=404, detail="Search record not found.")
+    return details
+
+@app.delete("/api/history/{search_id}")
+async def delete_search_record(search_id: str):
+    success = await database.delete_search(search_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Search record not found.")
+    return {"success": True, "message": "Search record and associated items deleted."}
+
+# Static Files & SPA Route
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    index_file = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_file):
+        with open(index_file, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>AliExpress AI Hunter</h1><p>Frontend static files not found.</p>")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,0 +1,20 @@
+# Python virtualenv & bytecode
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary test captures
+.browser_profile/
+captcha.png
+after_drag.png
+
+# Database & Environment (mounted at runtime)
+data/searches.db*
+.env
+
+# OS / IDE files
+.DS_Store
+.vscode/
+.idea/
