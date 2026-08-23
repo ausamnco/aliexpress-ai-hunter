@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   aliexpress-ai-hunter:
+    build: https://github.com/ausamnco/aliexpress-ai-hunter.git#main
     image: ghcr.io/ausamnco/aliexpress-ai-hunter:latest
     container_name: aliexpress-ai-hunter
     restart: unless-stopped
