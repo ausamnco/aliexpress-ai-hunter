@@ -1,4 +1,4 @@
-// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Smart Verification)
+// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Native Slider)
 
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
@@ -28,11 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let suggestDebounceTimeout = null;
   let activeSuggestIndex = -1;
 
-  // CAPTCHA drag state
-  let isDraggingCaptcha = false;
-  let captchaDragStart = { x: 0, y: 0 };
-  let captchaDragCurrent = { x: 0, y: 0 };
-  let activeCaptchaImage = new Image();
+  // Dedicated Slider Drag State
+  let isDraggingSlider = false;
+  let sliderStartX = 0;
+  let sliderDragDistance = 0;
 
   // Helper to prevent XSS
   function escapeHTML(str) {
@@ -97,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const countExcluded = document.getElementById('count-excluded');
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
 
-  // CAPTCHA Modal Elements
+  // CAPTCHA Modal & Slider Elements
   const captchaModal = document.getElementById('captcha-modal');
   const captchaSolveView = document.getElementById('captcha-solve-view');
   const captchaFailureView = document.getElementById('captcha-failure-view');
@@ -107,9 +106,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const continueRemainingBtn = document.getElementById('continue-remaining-btn');
   const closeCaptchaModal = document.getElementById('close-captcha-modal');
   const cancelCaptchaBtn = document.getElementById('cancel-captcha-btn');
-  const captchaCanvas = document.getElementById('captcha-canvas');
+  const captchaPreviewImg = document.getElementById('captcha-preview-img');
   const captchaLoadingOverlay = document.getElementById('captcha-loading-overlay');
   const resumeCaptchaBtn = document.getElementById('resume-captcha-btn');
+  const sliderTrack = document.getElementById('slider-track');
+  const sliderHandle = document.getElementById('slider-handle');
+  const sliderProgress = document.getElementById('slider-progress');
+  const sliderDragPct = document.getElementById('slider-drag-pct');
+  const sliderText = document.getElementById('slider-text');
 
   // Detail Modal Elements
   const productDetailModal = document.getElementById('product-detail-modal');
@@ -222,7 +226,6 @@ document.addEventListener('DOMContentLoaded', () => {
   searchTermInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       if (activeSuggestIndex >= 0 && suggestionsDropdown.children[activeSuggestIndex]) {
-        // Handled by suggestions dropdown
         return;
       }
       e.preventDefault();
@@ -267,7 +270,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (window.lucide) lucide.createIcons();
 
-    // Attach Input Listeners
     document.querySelectorAll('.condition-input').forEach(input => {
       input.addEventListener('input', (e) => {
         const index = parseInt(e.target.dataset.index, 10);
@@ -275,7 +277,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // Attach Remove Listeners
     document.querySelectorAll('.remove-cond-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const index = parseInt(btn.dataset.index, 10);
@@ -543,7 +544,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Flush any pending term in input box into chips
     if (searchTermInput.value.trim()) {
       addSearchTerm(searchTermInput.value);
       searchTermInput.value = '';
@@ -840,41 +840,28 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // 13. Interactive CAPTCHA Canvas Drag Solver
-  function redrawCaptchaCanvas(showDragLine = false) {
-    if (!activeCaptchaImage.src) return;
-    const ctx = captchaCanvas.getContext('2d');
-    ctx.clearRect(0, 0, captchaCanvas.width, captchaCanvas.height);
-    ctx.drawImage(activeCaptchaImage, 0, 0, captchaCanvas.width, captchaCanvas.height);
-
-    if (showDragLine && isDraggingCaptcha) {
-      ctx.strokeStyle = '#88C0D0';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(captchaDragStart.x, captchaDragStart.y);
-      ctx.lineTo(captchaDragCurrent.x, captchaDragCurrent.y);
-      ctx.stroke();
-
-      ctx.fillStyle = '#88C0D0';
-      ctx.beginPath();
-      ctx.arc(captchaDragCurrent.x, captchaDragCurrent.y, 8, 0, 2 * Math.PI);
-      ctx.fill();
-    }
+  // 13. Dedicated Interactive Slider Component
+  function resetSliderUI() {
+    isDraggingSlider = false;
+    sliderDragDistance = 0;
+    sliderHandle.style.left = '4px';
+    sliderProgress.style.width = '0%';
+    sliderDragPct.textContent = '0%';
+    sliderText.style.opacity = '1';
+    sliderHandle.classList.remove('cursor-grabbing');
+    sliderHandle.classList.add('cursor-grab');
   }
 
   function showCaptchaModal(screenshotB64, message) {
     if (!screenshotB64) return;
     captchaSolveView.classList.remove('hidden');
     captchaFailureView.classList.add('hidden');
+    captchaLoadingOverlay.classList.add('hidden');
     captchaModal.classList.remove('hidden');
     captchaModal.classList.add('flex');
 
-    activeCaptchaImage.onload = () => {
-      captchaCanvas.width = activeCaptchaImage.naturalWidth || 800;
-      captchaCanvas.height = activeCaptchaImage.naturalHeight || 450;
-      redrawCaptchaCanvas(false);
-    };
-    activeCaptchaImage.src = `data:image/jpeg;base64,${screenshotB64}`;
+    captchaPreviewImg.src = `data:image/jpeg;base64,${screenshotB64}`;
+    resetSliderUI();
   }
 
   function showCaptchaFailureModal(message, remainingTerms) {
@@ -902,9 +889,110 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideCaptchaModal() {
     captchaModal.classList.add('hidden');
     captchaModal.classList.remove('flex');
+    resetSliderUI();
   }
 
   closeCaptchaModal.addEventListener('click', hideCaptchaModal);
+
+  // Slider Mouse & Touch Interaction
+  function startSliderDrag(clientX) {
+    isDraggingSlider = true;
+    sliderStartX = clientX;
+    sliderHandle.classList.remove('cursor-grab');
+    sliderHandle.classList.add('cursor-grabbing');
+    sliderText.style.opacity = '0.4';
+  }
+
+  function moveSliderDrag(clientX) {
+    if (!isDraggingSlider) return;
+    const maxTrackWidth = sliderTrack.clientWidth - sliderHandle.clientWidth - 8;
+    if (maxTrackWidth <= 0) return;
+
+    let delta = clientX - sliderStartX;
+    if (delta < 0) delta = 0;
+    if (delta > maxTrackWidth) delta = maxTrackWidth;
+
+    sliderDragDistance = delta;
+    const pct = Math.round((delta / maxTrackWidth) * 100);
+
+    sliderHandle.style.left = `${delta + 4}px`;
+    sliderProgress.style.width = `${pct}%`;
+    sliderDragPct.textContent = `${pct}%`;
+  }
+
+  async function endSliderDrag() {
+    if (!isDraggingSlider || !currentSearchId) return;
+    isDraggingSlider = false;
+
+    const maxTrackWidth = sliderTrack.clientWidth - sliderHandle.clientWidth - 8;
+    const pct = maxTrackWidth > 0 ? (sliderDragDistance / maxTrackWidth) : 0;
+
+    if (pct < 0.6) {
+      // User didn't slide all the way across, spring back
+      resetSliderUI();
+      return;
+    }
+
+    // Complete slide action
+    captchaLoadingOverlay.classList.remove('hidden');
+
+    try {
+      const res = await fetch('/api/captcha/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          search_id: currentSearchId,
+          action: 'slide',
+          distance_pct: pct
+        })
+      });
+      const data = await res.json();
+      captchaLoadingOverlay.classList.add('hidden');
+
+      if (data.resolved) {
+        sliderProgress.style.width = '100%';
+        sliderDragPct.textContent = '100%';
+        setTimeout(hideCaptchaModal, 600);
+      } else if (data.screenshot) {
+        captchaPreviewImg.src = `data:image/jpeg;base64,${data.screenshot}`;
+        resetSliderUI();
+      }
+    } catch (err) {
+      captchaLoadingOverlay.classList.add('hidden');
+      resetSliderUI();
+    }
+  }
+
+  // Mouse Listeners
+  sliderHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    startSliderDrag(e.clientX);
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    moveSliderDrag(e.clientX);
+  });
+
+  window.addEventListener('mouseup', () => {
+    endSliderDrag();
+  });
+
+  // Touch Listeners (Mobile / Trackpad)
+  sliderHandle.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 0) {
+      startSliderDrag(e.touches[0].clientX);
+    }
+  });
+
+  window.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 0) {
+      moveSliderDrag(e.touches[0].clientX);
+    }
+  });
+
+  window.addEventListener('touchend', () => {
+    endSliderDrag();
+  });
 
   cancelCaptchaBtn.addEventListener('click', async () => {
     if (!currentSearchId) return;
@@ -940,78 +1028,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } catch (e) {}
     hideCaptchaModal();
-  });
-
-  captchaCanvas.addEventListener('mousedown', (e) => {
-    const rect = captchaCanvas.getBoundingClientRect();
-    const scaleX = captchaCanvas.width / rect.width;
-    const scaleY = captchaCanvas.height / rect.height;
-
-    captchaDragStart = {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
-    };
-    captchaDragCurrent = { ...captchaDragStart };
-    isDraggingCaptcha = true;
-  });
-
-  captchaCanvas.addEventListener('mousemove', (e) => {
-    if (!isDraggingCaptcha) return;
-    const rect = captchaCanvas.getBoundingClientRect();
-    const scaleX = captchaCanvas.width / rect.width;
-    const scaleY = captchaCanvas.height / rect.height;
-
-    captchaDragCurrent = {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
-    };
-    redrawCaptchaCanvas(true);
-  });
-
-  captchaCanvas.addEventListener('mouseup', async (e) => {
-    if (!isDraggingCaptcha || !currentSearchId) return;
-    isDraggingCaptcha = false;
-
-    const rect = captchaCanvas.getBoundingClientRect();
-    const scaleX = captchaCanvas.width / rect.width;
-    const scaleY = captchaCanvas.height / rect.height;
-
-    const endX = (e.clientX - rect.left) * scaleX;
-    const endY = (e.clientY - rect.top) * scaleY;
-
-    // Check if genuinely dragged (prevent accidental single click triggers)
-    const dragDistance = Math.abs(endX - captchaDragStart.x);
-    if (dragDistance < 25) {
-      redrawCaptchaCanvas(false);
-      return;
-    }
-
-    captchaLoadingOverlay.classList.remove('hidden');
-
-    try {
-      const res = await fetch('/api/captcha/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          search_id: currentSearchId,
-          action: 'drag',
-          start_x: captchaDragStart.x,
-          start_y: captchaDragStart.y,
-          end_x: endX,
-          end_y: endY
-        })
-      });
-      const data = await res.json();
-      captchaLoadingOverlay.classList.add('hidden');
-
-      if (data.resolved) {
-        setTimeout(hideCaptchaModal, 600);
-      } else if (data.screenshot) {
-        activeCaptchaImage.src = `data:image/jpeg;base64,${data.screenshot}`;
-      }
-    } catch (err) {
-      captchaLoadingOverlay.classList.add('hidden');
-    }
   });
 
   resumeCaptchaBtn.addEventListener('click', async () => {

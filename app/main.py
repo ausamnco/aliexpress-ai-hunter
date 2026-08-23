@@ -166,7 +166,8 @@ async def perform_captcha_action(req: CaptchaActionRequest):
         start_x=req.start_x,
         start_y=req.start_y,
         end_x=req.end_x,
-        end_y=req.end_y
+        end_y=req.end_y,
+        distance_pct=req.distance_pct
     )
     return result
 
