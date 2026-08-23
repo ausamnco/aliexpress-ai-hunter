@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from app import database
 from app import scraper
 from app import ai_evaluator
-from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest
+from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest, CaptchaResumeRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("aliexpress_ai_hunter")
@@ -80,19 +80,26 @@ async def get_search_suggestions(q: str = Query("", min_length=1)):
 
 @app.post("/api/search")
 async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
-    if not req.search_term.strip():
-        raise HTTPException(status_code=400, detail="Search term cannot be empty.")
+    # Support either single search_term or list of search_terms
+    terms = req.search_terms or []
+    if req.search_term and req.search_term.strip() and req.search_term.strip() not in terms:
+        terms.insert(0, req.search_term.strip())
+        
+    if not terms or not any(t.strip() for t in terms):
+        raise HTTPException(status_code=400, detail="At least one search term is required.")
     if not req.conditions.strip():
         raise HTTPException(status_code=400, detail="Conditions cannot be empty.")
     if not req.gemini_api_key.strip():
         raise HTTPException(status_code=400, detail="Gemini API Key is required.")
 
     search_id = str(uuid.uuid4())
+    primary_term = terms[0].strip()
     
     background_tasks.add_task(
         scraper.run_scraper_job,
         search_id=search_id,
-        search_term=req.search_term.strip(),
+        search_term=primary_term,
+        search_terms=terms,
         conditions=req.conditions.strip(),
         gemini_api_key=req.gemini_api_key.strip(),
         max_candidates=req.max_candidates,
@@ -104,8 +111,13 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
     return {
         "search_id": search_id,
         "status": "started",
-        "message": f"Search started for '{req.search_term}' with {req.max_candidates} max candidates."
+        "message": f"Search started for {len(terms)} search term(s) with {req.max_candidates} max candidates."
     }
+
+@app.post("/api/captcha/resume")
+async def resume_captcha_failure(req: scraper.models.CaptchaResumeRequest):
+    result = await scraper.resume_after_captcha_failure(req.search_id, req.action)
+    return result
 
 @app.get("/api/search/stream/{search_id}")
 async def stream_search_events(search_id: str):

@@ -1,4 +1,4 @@
-// AliExpress AI Product Hunter - Frontend Application (Nord & Light Themes)
+// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Smart Verification)
 
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
@@ -23,12 +23,16 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentSearchId = null;
   let activeProducts = [];
   let activeFilter = 'all';
-  let isDraggingCaptcha = false;
-  let captchaDragStart = { x: 0, y: 0 };
-  let activeCaptchaImage = new Image();
+  let searchTermsList = [];
   let conditionsList = [''];
   let suggestDebounceTimeout = null;
   let activeSuggestIndex = -1;
+
+  // CAPTCHA drag state
+  let isDraggingCaptcha = false;
+  let captchaDragStart = { x: 0, y: 0 };
+  let captchaDragCurrent = { x: 0, y: 0 };
+  let activeCaptchaImage = new Image();
 
   // Helper to prevent XSS
   function escapeHTML(str) {
@@ -66,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Search Form Elements
   const searchForm = document.getElementById('search-form');
   const searchTermInput = document.getElementById('search-term-input');
+  const searchChipsContainer = document.getElementById('search-chips-container');
   const suggestionsDropdown = document.getElementById('suggestions-dropdown');
   const conditionsContainer = document.getElementById('conditions-container');
   const addConditionBtn = document.getElementById('add-condition-btn');
@@ -94,7 +99,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // CAPTCHA Modal Elements
   const captchaModal = document.getElementById('captcha-modal');
+  const captchaSolveView = document.getElementById('captcha-solve-view');
+  const captchaFailureView = document.getElementById('captcha-failure-view');
+  const captchaFailureMessage = document.getElementById('captcha-failure-message');
+  const remainingTermsList = document.getElementById('remaining-terms-list');
+  const retryCaptchaBtn = document.getElementById('retry-captcha-btn');
+  const continueRemainingBtn = document.getElementById('continue-remaining-btn');
   const closeCaptchaModal = document.getElementById('close-captcha-modal');
+  const cancelCaptchaBtn = document.getElementById('cancel-captcha-btn');
   const captchaCanvas = document.getElementById('captcha-canvas');
   const captchaLoadingOverlay = document.getElementById('captcha-loading-overlay');
   const resumeCaptchaBtn = document.getElementById('resume-captcha-btn');
@@ -154,7 +166,82 @@ document.addEventListener('DOMContentLoaded', () => {
     loadHistory();
   });
 
-  // 3. Dynamic Numbered Criteria Fields (Max 10)
+  // 3. Gmail-Style Search Term(s) Chips Box
+  function renderSearchChips() {
+    searchChipsContainer.innerHTML = '';
+    if (searchTermsList.length === 0) {
+      searchChipsContainer.innerHTML = `<span id="chips-empty-hint" class="text-xs text-nord-3 italic px-1 py-0.5">No search terms confirmed yet. Type above and press Enter.</span>`;
+      return;
+    }
+
+    searchTermsList.forEach((term, idx) => {
+      const chip = document.createElement('div');
+      chip.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-nord-8/15 border border-nord-8/30 text-nord-8 text-xs font-semibold animate-in fade-in zoom-in-95 duration-100';
+      chip.innerHTML = `
+        <span class="chip-text cursor-pointer hover:underline" title="Click to edit">${escapeHTML(term)}</span>
+        <button type="button" class="remove-chip-btn text-nord-8/70 hover:text-nord-11 transition" data-index="${idx}">
+          <i data-lucide="x" class="w-3 h-3"></i>
+        </button>
+      `;
+      searchChipsContainer.appendChild(chip);
+    });
+
+    if (window.lucide) lucide.createIcons();
+
+    // Attach Remove Listeners
+    searchChipsContainer.querySelectorAll('.remove-chip-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const index = parseInt(btn.dataset.index, 10);
+        searchTermsList.splice(index, 1);
+        renderSearchChips();
+      });
+    });
+
+    // Attach Edit Listeners
+    searchChipsContainer.querySelectorAll('.chip-text').forEach((el, idx) => {
+      el.addEventListener('click', () => {
+        const term = searchTermsList[idx];
+        searchTermInput.value = term;
+        searchTermsList.splice(idx, 1);
+        renderSearchChips();
+        searchTermInput.focus();
+      });
+    });
+  }
+
+  function addSearchTerm(rawTerm) {
+    if (!rawTerm) return;
+    const clean = rawTerm.replace(/,/g, '').trim();
+    if (clean && !searchTermsList.includes(clean)) {
+      searchTermsList.push(clean);
+      renderSearchChips();
+    }
+  }
+
+  searchTermInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      if (activeSuggestIndex >= 0 && suggestionsDropdown.children[activeSuggestIndex]) {
+        // Handled by suggestions dropdown
+        return;
+      }
+      e.preventDefault();
+      addSearchTerm(searchTermInput.value);
+      searchTermInput.value = '';
+      suggestionsDropdown.classList.add('hidden');
+    }
+  });
+
+  searchTermInput.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (searchTermInput.value.trim()) {
+        addSearchTerm(searchTermInput.value);
+        searchTermInput.value = '';
+      }
+    }, 200);
+  });
+
+  // 4. Dynamic Numbered Criteria Fields (Max 10)
   function renderConditions() {
     conditionsContainer.innerHTML = '';
     conditionCountBadge.textContent = `${conditionsList.length} / 10`;
@@ -197,7 +284,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // Disable add button if 10 reached
     if (conditionsList.length >= 10) {
       addConditionBtn.disabled = true;
       addConditionBtn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -216,15 +302,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Initial render of conditions
   renderConditions();
 
-  // 4. Destination Country & Currency Auto-Sync
+  // 5. Destination Country & Currency Auto-Sync
   shipCountrySelect.addEventListener('change', () => {
     const selectedCountry = shipCountrySelect.value;
     const autoCurrency = COUNTRY_CURRENCY_MAP[selectedCountry] || 'USD';
-    
-    // Auto-select currency if supported option exists
     const matchingOption = currencySelect.querySelector(`option[value="${autoCurrency}"]`);
     if (matchingOption) {
       currencySelect.value = autoCurrency;
@@ -233,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 5. Generic Search Term Live Autofill / Spell Correction
+  // 6. Generic Search Term Live Autofill / Spell Suggestion
   searchTermInput.addEventListener('input', () => {
     const query = searchTermInput.value.trim();
     if (suggestDebounceTimeout) clearTimeout(suggestDebounceTimeout);
@@ -257,12 +340,13 @@ document.addEventListener('DOMContentLoaded', () => {
         suggestionsDropdown.innerHTML = '';
         activeSuggestIndex = -1;
 
-        suggestions.forEach((term, index) => {
+        suggestions.forEach((term) => {
           const item = document.createElement('div');
           item.className = 'suggestion-item px-3.5 py-2 text-xs text-nord-5 cursor-pointer flex items-center gap-2';
           item.innerHTML = `<i data-lucide="search" class="w-3.5 h-3.5 text-nord-3"></i><span>${escapeHTML(term)}</span>`;
           item.addEventListener('click', () => {
-            searchTermInput.value = term;
+            addSearchTerm(term);
+            searchTermInput.value = '';
             suggestionsDropdown.classList.add('hidden');
           });
           suggestionsDropdown.appendChild(item);
@@ -301,21 +385,19 @@ document.addEventListener('DOMContentLoaded', () => {
     items.forEach((it, idx) => {
       if (idx === activeSuggestIndex) {
         it.classList.add('selected');
-        searchTermInput.value = it.innerText.trim();
       } else {
         it.classList.remove('selected');
       }
     });
   }
 
-  // Close suggestions when clicking outside
   document.addEventListener('click', (e) => {
     if (!searchTermInput.contains(e.target) && !suggestionsDropdown.contains(e.target)) {
       suggestionsDropdown.classList.add('hidden');
     }
   });
 
-  // 6. Mandatory Entrance Gate & Gemini API Key
+  // 7. Mandatory Entrance Gate & Gemini API Key
   async function fetchAvailableModels(apiKey) {
     try {
       const res = await fetch('/api/models', {
@@ -341,7 +423,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function checkApiKeyEntranceGate() {
     if (!currentApiKey) {
-      // Force entrance gate modal (non-dismissible)
       closeApiKeyModal.classList.add('hidden');
       cancelApiKeyBtn.classList.add('hidden');
       apiKeyModal.classList.remove('hidden');
@@ -367,7 +448,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function closeKeyModal() {
-    if (!currentApiKey) return; // Prevent closing if no valid key set
+    if (!currentApiKey) return;
     apiKeyModal.classList.add('hidden');
     apiKeyModal.classList.remove('flex');
   }
@@ -381,7 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!key) return;
 
     keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-0 text-nord-4 border-nord-2 block';
-    keyValidationMessage.textContent = 'Validating key with Google Gemini API...';
+    keyValidationMessage.textContent = 'Diagnosing and validating key with Google Gemini API...';
 
     try {
       const res = await fetch('/api/validate-key', {
@@ -412,8 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
         keyValidationMessage.textContent = '✅ ' + (data.message || 'Gemini API key validated and active! App unlocked.');
         setTimeout(closeKeyModal, 1200);
       } else if (data.valid && !data.quota_available) {
-        // Valid key but quota limit / probe failed
-        currentApiKey = key; // Store key so they don't lose it
+        currentApiKey = key;
         keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-13/15 text-nord-13 border-nord-13/30 block leading-relaxed';
         keyValidationMessage.innerHTML = `
           <div class="font-bold mb-1 flex items-center gap-1.5 text-nord-13">
@@ -445,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 7. Filter Buttons
+  // 8. Filter Buttons
   filterTabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       filterTabBtns.forEach(b => b.classList.remove('active'));
@@ -455,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 8. Search Form Submission
+  // 9. Search Form Submission
   searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!currentApiKey) {
@@ -463,15 +543,18 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const searchTerm = searchTermInput.value.trim();
-    const validConditions = conditionsList.map(c => c.trim()).filter(Boolean);
+    // Flush any pending term in input box into chips
+    if (searchTermInput.value.trim()) {
+      addSearchTerm(searchTermInput.value);
+      searchTermInput.value = '';
+    }
 
-    if (!searchTerm) {
+    if (searchTermsList.length === 0) {
       searchTermInput.focus();
       return;
     }
 
-    // Add Destination Country delivery check as mandatory criterion
+    const validConditions = conditionsList.map(c => c.trim()).filter(Boolean);
     const selectedCountryText = shipCountrySelect.options[shipCountrySelect.selectedIndex].text;
     const countryCriteriaText = `Deliverable and shippable to ${selectedCountryText}`;
     if (!validConditions.some(c => c.toLowerCase().includes('deliverable') || c.toLowerCase().includes('shipping'))) {
@@ -480,7 +563,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const joinedConditions = validConditions.map((c, i) => `${i + 1}. ${c}`).join('\n');
 
-    // Reset UI for live execution
     activeProducts = [];
     renderProducts();
     liveStatusCard.classList.remove('hidden');
@@ -500,7 +582,8 @@ document.addEventListener('DOMContentLoaded', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          search_term: searchTerm,
+          search_term: searchTermsList[0],
+          search_terms: searchTermsList,
           conditions: joinedConditions,
           gemini_api_key: currentApiKey,
           max_candidates: parseInt(maxCandidatesSelect.value, 10),
@@ -526,7 +609,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 9. SSE Stream Listener
+  // 10. SSE Stream Listener
   function connectSSEStream(searchId) {
     if (activeEventSource) activeEventSource.close();
     activeEventSource = new EventSource(`/api/search/stream/${searchId}`);
@@ -572,6 +655,10 @@ document.addEventListener('DOMContentLoaded', () => {
         hideCaptchaModal();
         break;
 
+      case 'captcha_failed':
+        showCaptchaFailureModal(data.message, data.remaining_terms || []);
+        break;
+
       case 'search_completed':
         if (data.items && data.items.length > 0) {
           activeProducts = data.items;
@@ -595,7 +682,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 10. Render Product Cards
+  // 11. Render Product Cards
   function renderProducts() {
     countAll.textContent = activeProducts.length;
     const matchesCount = activeProducts.filter(p => p.is_match).length;
@@ -681,7 +768,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 11. Show Product Detail Modal
+  // 12. Show Product Detail Modal
   function showProductDetail(item) {
     if (!item) return;
 
@@ -753,19 +840,63 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // 12. CAPTCHA Canvas Drag Solver
+  // 13. Interactive CAPTCHA Canvas Drag Solver
+  function redrawCaptchaCanvas(showDragLine = false) {
+    if (!activeCaptchaImage.src) return;
+    const ctx = captchaCanvas.getContext('2d');
+    ctx.clearRect(0, 0, captchaCanvas.width, captchaCanvas.height);
+    ctx.drawImage(activeCaptchaImage, 0, 0, captchaCanvas.width, captchaCanvas.height);
+
+    if (showDragLine && isDraggingCaptcha) {
+      ctx.strokeStyle = '#88C0D0';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(captchaDragStart.x, captchaDragStart.y);
+      ctx.lineTo(captchaDragCurrent.x, captchaDragCurrent.y);
+      ctx.stroke();
+
+      ctx.fillStyle = '#88C0D0';
+      ctx.beginPath();
+      ctx.arc(captchaDragCurrent.x, captchaDragCurrent.y, 8, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
   function showCaptchaModal(screenshotB64, message) {
     if (!screenshotB64) return;
+    captchaSolveView.classList.remove('hidden');
+    captchaFailureView.classList.add('hidden');
     captchaModal.classList.remove('hidden');
     captchaModal.classList.add('flex');
 
     activeCaptchaImage.onload = () => {
       captchaCanvas.width = activeCaptchaImage.naturalWidth || 800;
       captchaCanvas.height = activeCaptchaImage.naturalHeight || 450;
-      const ctx = captchaCanvas.getContext('2d');
-      ctx.drawImage(activeCaptchaImage, 0, 0);
+      redrawCaptchaCanvas(false);
     };
     activeCaptchaImage.src = `data:image/jpeg;base64,${screenshotB64}`;
+  }
+
+  function showCaptchaFailureModal(message, remainingTerms) {
+    captchaSolveView.classList.add('hidden');
+    captchaFailureView.classList.remove('hidden');
+    captchaFailureMessage.textContent = message || 'AliExpress verification challenge failed.';
+
+    remainingTermsList.innerHTML = '';
+    if (!remainingTerms || remainingTerms.length === 0) {
+      remainingTermsList.innerHTML = '<span class="text-xs text-nord-3 italic">No remaining terms left in queue.</span>';
+    } else {
+      remainingTerms.forEach(t => {
+        const chip = document.createElement('span');
+        chip.className = 'px-2.5 py-1 rounded-lg bg-nord-2 text-nord-4 text-xs font-mono font-medium';
+        chip.textContent = t;
+        remainingTermsList.appendChild(chip);
+      });
+    }
+
+    captchaModal.classList.remove('hidden');
+    captchaModal.classList.add('flex');
+    if (window.lucide) lucide.createIcons();
   }
 
   function hideCaptchaModal() {
@@ -774,6 +905,42 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   closeCaptchaModal.addEventListener('click', hideCaptchaModal);
+
+  cancelCaptchaBtn.addEventListener('click', async () => {
+    if (!currentSearchId) return;
+    try {
+      await fetch('/api/captcha/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search_id: currentSearchId, action: 'cancel' })
+      });
+    } catch (e) {}
+    hideCaptchaModal();
+  });
+
+  retryCaptchaBtn.addEventListener('click', async () => {
+    if (!currentSearchId) return;
+    try {
+      await fetch('/api/captcha/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search_id: currentSearchId, action: 'retry' })
+      });
+    } catch (e) {}
+    hideCaptchaModal();
+  });
+
+  continueRemainingBtn.addEventListener('click', async () => {
+    if (!currentSearchId) return;
+    try {
+      await fetch('/api/captcha/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search_id: currentSearchId, action: 'continue_remaining' })
+      });
+    } catch (e) {}
+    hideCaptchaModal();
+  });
 
   captchaCanvas.addEventListener('mousedown', (e) => {
     const rect = captchaCanvas.getBoundingClientRect();
@@ -784,7 +951,21 @@ document.addEventListener('DOMContentLoaded', () => {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY
     };
+    captchaDragCurrent = { ...captchaDragStart };
     isDraggingCaptcha = true;
+  });
+
+  captchaCanvas.addEventListener('mousemove', (e) => {
+    if (!isDraggingCaptcha) return;
+    const rect = captchaCanvas.getBoundingClientRect();
+    const scaleX = captchaCanvas.width / rect.width;
+    const scaleY = captchaCanvas.height / rect.height;
+
+    captchaDragCurrent = {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+    redrawCaptchaCanvas(true);
   });
 
   captchaCanvas.addEventListener('mouseup', async (e) => {
@@ -797,6 +978,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const endX = (e.clientX - rect.left) * scaleX;
     const endY = (e.clientY - rect.top) * scaleY;
+
+    // Check if genuinely dragged (prevent accidental single click triggers)
+    const dragDistance = Math.abs(endX - captchaDragStart.x);
+    if (dragDistance < 25) {
+      redrawCaptchaCanvas(false);
+      return;
+    }
 
     captchaLoadingOverlay.classList.remove('hidden');
 
@@ -816,12 +1004,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       captchaLoadingOverlay.classList.add('hidden');
 
-      if (data.screenshot) {
-        activeCaptchaImage.src = `data:image/jpeg;base64,${data.screenshot}`;
-      }
-
       if (data.resolved) {
-        setTimeout(hideCaptchaModal, 800);
+        setTimeout(hideCaptchaModal, 600);
+      } else if (data.screenshot) {
+        activeCaptchaImage.src = `data:image/jpeg;base64,${data.screenshot}`;
       }
     } catch (err) {
       captchaLoadingOverlay.classList.add('hidden');
@@ -842,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 13. History Management
+  // 14. History Management
   async function loadHistoryCount() {
     try {
       const res = await fetch('/api/history');
@@ -936,11 +1122,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const search = await res.json();
       if (!search) return;
 
-      searchTermInput.value = search.search_term || '';
+      searchTermsList = (search.search_term || '').split(',').map(t => t.trim()).filter(Boolean);
+      renderSearchChips();
+
       shipCountrySelect.value = search.ship_country || 'AU';
       currencySelect.value = search.currency || 'AUD';
 
-      // Parse conditions into rows
       if (search.conditions) {
         const rawLines = search.conditions.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
         conditionsList = rawLines.length > 0 ? rawLines : [''];

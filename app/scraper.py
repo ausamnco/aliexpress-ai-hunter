@@ -2,69 +2,203 @@ import asyncio
 import base64
 import json
 import logging
-import os
-import re
+import random
+import time
+import math
 import urllib.parse
-from typing import Dict, List, Optional, Any, Callable
-from playwright.async_api import async_playwright, Page, BrowserContext, Browser
-from playwright_stealth import Stealth
+from typing import List, Dict, Any, Optional
+from playwright.async_api import async_playwright, Page, BrowserContext
+from playwright_stealth import stealth_async
 
 from app import database
 from app import ai_evaluator
-from app.models import ProductEvaluation, CriteriaEvaluation
+from app.models import ItemDetail
 
-logger = logging.getLogger(__name__)
-
-# Active scraping sessions
-sessions: Dict[str, "ScraperSession"] = {}
+logger = logging.getLogger("aliexpress_scraper")
 
 class ScraperSession:
     def __init__(self, search_id: str):
         self.search_id = search_id
-        self.status = "initializing"
-        self.stage = "Starting..."
+        self.status = "pending"
+        self.stage = "Initializing"
         self.progress_pct = 0
-        self.is_captcha_active = False
-        self.captcha_screenshot_b64: Optional[str] = None
-        self.page: Optional[Page] = None
-        self.context: Optional[BrowserContext] = None
-        self.browser: Optional[Browser] = None
-        self.event_queue: asyncio.Queue = asyncio.Queue()
-        self.captcha_resolved_event = asyncio.Event()
+        self.total_candidates = 0
+        self.evaluated_count = 0
+        self.matched_count = 0
+        self.event_queue = asyncio.Queue()
+        self.active_page: Optional[Page] = None
+        self.captcha_event = asyncio.Event()
+        self.captcha_resume_event = asyncio.Event()
+        self.resume_action = "continue_remaining"
         self.is_cancelled = False
-        self.evaluated_items: List[Dict[str, Any]] = []
+        self.remaining_terms: List[str] = []
 
-    async def emit_event(self, event_type: str, data: Dict[str, Any]):
+    async def emit_event(self, event_type: str, data: Dict[str, Any] = None):
         payload = {
-            "type": event_type,
             "search_id": self.search_id,
-            "status": self.status,
+            "type": event_type,
             "stage": self.stage,
             "progress_pct": self.progress_pct,
-            "data": data
+            "data": data or {}
         }
         await self.event_queue.put(payload)
 
-def check_captcha_needed(page_text: str, current_url: str) -> bool:
-    blocked_keywords = [
-        "_____tmd_____/punish",
-        "sec-captcha",
-        "baxia-dialog",
-        "captcha verification",
-        "please slide to verify",
-        "please drag the slider",
-    ]
-    current_url_lower = current_url.lower()
-    page_text_lower = page_text.lower()
-    return any(kw in current_url_lower or kw in page_text_lower for kw in blocked_keywords)
+sessions: Dict[str, ScraperSession] = {}
 
-async def capture_page_screenshot_b64(page: Page) -> str:
+async def natural_mouse_move_and_drag(page: Page, start_x: float, start_y: float, end_x: float, end_y: float):
+    """
+    Simulates human-like mouse movement with acceleration, deceleration, and micro-jitter.
+    """
+    await page.mouse.move(start_x, start_y)
+    await asyncio.sleep(random.uniform(0.05, 0.15))
+    await page.mouse.down()
+    await asyncio.sleep(random.uniform(0.05, 0.1))
+
+    steps = random.randint(25, 38)
+    for i in range(1, steps + 1):
+        t = i / steps
+        # Ease-in-out curve
+        ease = 0.5 * (1 - math.cos(t * math.pi))
+        curr_x = start_x + (end_x - start_x) * ease + random.uniform(-1.5, 1.5)
+        curr_y = start_y + (end_y - start_y) * ease + random.uniform(-2.0, 2.0)
+        await page.mouse.move(curr_x, curr_y)
+        # Variable speed: slower at start and end
+        speed_delay = 0.008 + (1 - math.sin(t * math.pi)) * 0.015
+        await asyncio.sleep(speed_delay)
+
+    await page.mouse.move(end_x, end_y)
+    await asyncio.sleep(random.uniform(0.1, 0.25))
+    await page.mouse.up()
+    await asyncio.sleep(0.5)
+
+async def attempt_automated_slider_solve(page: Page) -> bool:
+    """
+    Attempts to automatically find and slide the verification puzzle on AliExpress.
+    Returns True if successfully solved/cleared, False otherwise.
+    """
     try:
-        screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
-        return base64.b64encode(screenshot_bytes).decode("utf-8")
+        if "punish" not in page.url:
+            return True
+
+        logger.info("Attempting automated slider challenge solve...")
+        await asyncio.sleep(1.0)
+
+        # Look for the slider button in main page or iframes
+        slider_selectors = [
+            "#nc_1_n1z",
+            ".nc_iconfont.btn_slide",
+            ".btn_slide",
+            "#nc_1_wrapper .btn_slide",
+            ".nc_scale span[id*='n1z']",
+            "span[id*='nc_1_n1z']"
+        ]
+
+        slider_el = None
+        for sel in slider_selectors:
+            el = await page.$(sel)
+            if el and await el.is_visible():
+                slider_el = el
+                break
+
+        if not slider_el:
+            # Check frames
+            for frame in page.frames:
+                for sel in slider_selectors:
+                    el = await frame.$(sel)
+                    if el and await el.is_visible():
+                        slider_el = el
+                        break
+                if slider_el:
+                    break
+
+        if not slider_el:
+            logger.info("No visible slider button found for automated solve.")
+            return False
+
+        box = await slider_el.bounding_box()
+        if not box:
+            return False
+
+        start_x = box["x"] + box["width"] / 2
+        start_y = box["y"] + box["height"] / 2
+        drag_distance = random.uniform(280, 320)
+        end_x = start_x + drag_distance
+        end_y = start_y + random.uniform(-2, 2)
+
+        logger.info(f"Executing automated human-like slider drag from ({start_x:.1f}, {start_y:.1f}) to ({end_x:.1f}, {end_y:.1f})")
+        await natural_mouse_move_and_drag(page, start_x, start_y, end_x, end_y)
+        await asyncio.sleep(2.5)
+
+        # Check if challenge cleared
+        curr_url = page.url
+        if "punish" not in curr_url:
+            logger.info("Automated challenge solve SUCCEEDED!")
+            return True
+
+        # Check if error message appeared
+        error_el = await page.$(".nc-lang-cnt, #nc_1__scale_text")
+        if error_el:
+            txt = (await error_el.text_content() or "").lower()
+            if "pass" in txt or "success" in txt:
+                logger.info("Verification passed detected via text!")
+                return True
+
+        logger.info("Automated solve did not clear the punish page.")
+        return False
     except Exception as e:
-        logger.error(f"Error capturing screenshot: {e}")
-        return ""
+        logger.warning(f"Error during automated slider solve attempt: {e}")
+        return False
+
+async def handle_captcha_interaction(
+    search_id: str,
+    action: str,
+    start_x: Optional[float] = None,
+    start_y: Optional[float] = None,
+    end_x: Optional[float] = None,
+    end_y: Optional[float] = None
+) -> Dict[str, Any]:
+    session = sessions.get(search_id)
+    if not session or not session.active_page:
+        return {"success": False, "message": "No active scraper session or page."}
+
+    page = session.active_page
+
+    if action == "drag" and start_x is not None and end_x is not None:
+        try:
+            await natural_mouse_move_and_drag(page, start_x, start_y, end_x, end_y)
+            await asyncio.sleep(2.0)
+
+            resolved = "punish" not in page.url
+            if resolved:
+                session.captcha_event.set()
+                await session.emit_event("captcha_cleared", {"message": "Verification passed!"})
+                return {"success": True, "resolved": True}
+            else:
+                screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
+                b64_img = base64.b64encode(screenshot_bytes).decode("utf-8")
+                return {"success": True, "resolved": False, "screenshot": b64_img}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    elif action == "resolve":
+        session.captcha_event.set()
+        await session.emit_event("captcha_cleared", {"message": "Verification submitted."})
+        return {"success": True, "resolved": True}
+
+    elif action == "cancel":
+        session.captcha_event.set()
+        return {"success": True, "resolved": False}
+
+    return {"success": False, "message": "Unknown action."}
+
+async def resume_after_captcha_failure(search_id: str, action: str) -> Dict[str, Any]:
+    session = sessions.get(search_id)
+    if not session:
+        return {"success": False, "message": "Session not found."}
+
+    session.resume_action = action
+    session.captcha_resume_event.set()
+    return {"success": True, "action": action}
 
 async def run_scraper_job(
     search_id: str,
@@ -74,333 +208,326 @@ async def run_scraper_job(
     max_candidates: int = 30,
     ship_country: str = "AU",
     currency: str = "AUD",
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-2.5-flash",
+    search_terms: Optional[List[str]] = None
 ):
     session = ScraperSession(search_id)
     sessions[search_id] = session
-    
-    await database.create_search(search_id, search_term, conditions, currency, ship_country)
-    
-    stealth = Stealth()
-    session.status = "running"
-    session.stage = "Initializing browser session..."
-    session.progress_pct = 5
-    await session.emit_event("status_update", {"message": "Starting Playwright browser..."})
 
     try:
+        session.status = "running"
+        session.stage = "Parsing search terms and generating keyword variations..."
+        session.progress_pct = 5
+        await session.emit_event("search_started")
+
+        # Compile list of search terms
+        all_terms = []
+        if search_terms:
+            all_terms.extend([t.strip() for t in search_terms if t.strip()])
+        if search_term and search_term.strip() and search_term.strip() not in all_terms:
+            all_terms.insert(0, search_term.strip())
+        if not all_terms:
+            all_terms = [search_term.strip() or "Product"]
+
+        # Generate variations for terms if needed
+        search_queries = []
+        for term in all_terms:
+            variations = await ai_evaluator.generate_search_variations(
+                search_term=term,
+                conditions=conditions,
+                api_key=gemini_api_key,
+                model_name=model_name
+            )
+            for v in variations:
+                if v not in search_queries:
+                    search_queries.append(v)
+
+        if not search_queries:
+            search_queries = all_terms
+
+        logger.info(f"Target search queries ({len(search_queries)}): {search_queries}")
+
+        session.stage = "Launching browser..."
+        session.progress_pct = 10
+        await session.emit_event("browser_launching")
+
         async with async_playwright() as p:
-            session.browser = await p.chromium.launch(
+            browser = await p.chromium.launch(
                 headless=True,
                 args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-infobars',
-                    '--disable-dev-shm-usage',
-                    '--window-size=1920,1080',
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
                 ]
             )
-            
-            session.context = await session.browser.new_context(
+
+            context: BrowserContext = await browser.new_context(
+                viewport={"width": 1366, "height": 768},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
                 locale="en-US",
-                extra_http_headers={
-                    "Accept-Language": "en-US,en;q=0.9",
-                }
+                timezone_id="Australia/Sydney",
             )
-            
-            # Add localization cookies
-            await session.context.add_cookies([
-                {"name": "aep_usuc_f", "value": f"site=glo&c_tp={currency}&region={ship_country}&b_locale=en_US", "domain": ".aliexpress.com", "path": "/"},
-                {"name": "intl_locale", "value": "en_US", "domain": ".aliexpress.com", "path": "/"},
-                {"name": "xman_us_f", "value": f"x_locale=en_US&x_c_chrg={currency}&x_chrg_r={currency}", "domain": ".aliexpress.com", "path": "/"},
+
+            # Set AliExpress localization cookies
+            cookie_domain = ".aliexpress.com"
+            await context.add_cookies([
+                {"name": "aep_usuc_f", "value": f"site=glo&c_tp={currency}&region={ship_country}&b_locale=en_US", "domain": cookie_domain, "path": "/"},
+                {"name": "intl_locale", "value": "en_US", "domain": cookie_domain, "path": "/"},
             ])
-            
-            session.page = await session.context.new_page()
-            await stealth.apply_stealth_async(session.page)
 
-            # Step 1: Generate Search Query Variations using Gemini
-            session.stage = "Generating optimized search queries with Gemini AI..."
-            session.progress_pct = 10
-            await session.emit_event("status_update", {"message": "Asking Gemini for search keyword variations..."})
-            
-            search_queries = await ai_evaluator.generate_search_variations(search_term, conditions, gemini_api_key, model_name)
-            if search_term not in search_queries:
-                search_queries.insert(0, search_term)
-                
-            await session.emit_event("search_queries_ready", {"queries": search_queries})
+            page: Page = await context.new_page()
+            await stealth_async(page)
+            session.active_page = page
 
-            # Step 2: Multi-Query Search Crawl
-            collected_candidates: Dict[str, Dict[str, Any]] = {}
-            
-            for q_idx, query in enumerate(search_queries):
-                if session.is_cancelled or len(collected_candidates) >= max_candidates:
+            discovered_items: Dict[str, Dict[str, Any]] = {}
+            query_index = 0
+
+            while query_index < len(search_queries):
+                query = search_queries[query_index]
+                if len(discovered_items) >= max_candidates:
                     break
-                    
-                session.stage = f"Searching AliExpress for: '{query}'"
-                session.progress_pct = 15 + int((q_idx / len(search_queries)) * 25)
-                await session.emit_event("search_query_progress", {"query": query, "index": q_idx + 1, "total": len(search_queries)})
-                
-                encoded = urllib.parse.quote_plus(query)
-                search_url = f"https://www.aliexpress.com/wholesale?SearchText={encoded}&shipCountry={ship_country}"
-                
+
+                session.stage = f"Searching AliExpress for: '{query}' ({query_index + 1}/{len(search_queries)})"
+                session.progress_pct = 15 + int((query_index / len(search_queries)) * 25)
+                await session.emit_event("query_started", {"query": query, "query_index": query_index + 1})
+
+                search_url = f"https://www.aliexpress.com/wholesale?SearchText={urllib.parse.quote_plus(query)}&shipCountry={ship_country}"
                 try:
-                    await session.page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
-                    await session.page.wait_for_timeout(2000)
+                    await page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
+                    await asyncio.sleep(2.0)
+                except Exception as e:
+                    logger.warning(f"Timeout loading search url '{search_url}': {e}")
+
+                # Check for verification challenge
+                if "punish" in page.url or await page.$("#nc_1_n1z, .btn_slide"):
+                    logger.info("Verification challenge triggered! Executing automated solver first...")
                     
-                    # Check for CAPTCHA
-                    page_content = await session.page.content()
-                    if check_captcha_needed(page_content, session.page.url):
-                        session.is_captcha_active = True
-                        session.captcha_screenshot_b64 = await capture_page_screenshot_b64(session.page)
-                        session.captcha_resolved_event.clear()
-                        
+                    # 1. Attempt automated solver
+                    auto_solved = await attempt_automated_slider_solve(page)
+                    
+                    # 2. If automated solve failed, trigger manual modal
+                    if not auto_solved and "punish" in page.url:
+                        session.stage = "Verification required. Please solve the challenge."
+                        screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
+                        b64_img = base64.b64encode(screenshot_bytes).decode("utf-8")
+                        session.captcha_event.clear()
+
                         await session.emit_event("captcha_required", {
-                            "message": "AliExpress verification challenge detected! Please solve it in the modal.",
-                            "screenshot": session.captcha_screenshot_b64,
-                            "url": session.page.url
+                            "screenshot": b64_img,
+                            "message": "AliExpress verification challenge. Please drag the slider to verify."
                         })
-                        
-                        # Wait for user resolution or timeout
+
+                        # Wait up to 120s for manual resolution
                         try:
-                            await asyncio.wait_for(session.captcha_resolved_event.wait(), timeout=120)
+                            await asyncio.wait_for(session.captcha_event.wait(), timeout=120.0)
                         except asyncio.TimeoutError:
-                            logger.warning(f"Search {search_id} CAPTCHA timeout.")
-                            
-                        session.is_captcha_active = False
-                        session.captcha_screenshot_b64 = None
-                        await session.emit_event("captcha_cleared", {"message": "Verification cleared. Resuming..."})
-                        await session.page.wait_for_timeout(2000)
-                        
-                    # Scroll down to load product cards
-                    for _ in range(5):
-                        await session.page.evaluate("window.scrollBy(0, 900)")
-                        await session.page.wait_for_timeout(800)
-                        
-                    item_links = await session.page.locator("a[href*='/item/']").all()
-                    
-                    for link in item_links:
-                        href = await link.get_attribute("href")
-                        if not href:
+                            logger.warning("Manual CAPTCHA resolution timed out.")
+
+                        # Check if verification succeeded
+                        if "punish" in page.url:
+                            # Verification failed or cancelled!
+                            remaining = search_queries[query_index + 1:]
+                            session.remaining_terms = remaining
+                            session.captcha_resume_event.clear()
+
+                            logger.warning(f"Verification challenge unresolved. Pausing search. Remaining queries: {remaining}")
+                            await session.emit_event("captcha_failed", {
+                                "failed_term": query,
+                                "remaining_terms": remaining,
+                                "message": f"Verification challenge was not completed for '{query}'."
+                            })
+
+                            # Wait for user choice (Retry or Continue with Remaining)
+                            try:
+                                await asyncio.wait_for(session.captcha_resume_event.wait(), timeout=300.0)
+                            except asyncio.TimeoutError:
+                                session.resume_action = "continue_remaining"
+
+                            if session.resume_action == "retry":
+                                # Don't increment query_index, re-try this query
+                                continue
+                            else:
+                                # Continue with remaining terms (skip current query)
+                                query_index += 1
+                                continue
+                        else:
+                            await session.emit_event("captcha_cleared")
+
+                # Scroll down smoothly to trigger lazy loading of product items
+                for scroll_step in range(3):
+                    await page.evaluate(f"window.scrollBy(0, {500 + scroll_step * 300});")
+                    await asyncio.sleep(random.uniform(0.6, 1.2))
+
+                # Extract product links and card information
+                cards = await page.$$("a[href*='/item/']")
+                logger.info(f"Found {len(cards)} item anchor tags on page for '{query}'.")
+
+                for card in cards:
+                    if len(discovered_items) >= max_candidates:
+                        break
+
+                    try:
+                        href = await card.get_attribute("href")
+                        if not href or "/item/" not in href:
                             continue
-                            
-                        id_match = re.search(r'/item/(\d+)\.html', href)
-                        if not id_match:
+
+                        item_id = href.split("/item/")[-1].split(".html")[0].split("?")[0]
+                        if not item_id.isdigit() or item_id in discovered_items:
                             continue
-                        item_id = id_match.group(1)
+
+                        clean_url = f"https://www.aliexpress.com/item/{item_id}.html"
+                        card_text = (await card.text_content() or "").strip()
                         
-                        if item_id in collected_candidates:
-                            continue
-                            
-                        card_text = await link.inner_text()
-                        lines = [l.strip() for l in card_text.split("\n") if l.strip()]
-                        title = lines[0] if lines else "AliExpress Product"
+                        img_el = await card.$("img")
+                        img_src = await img_el.get_attribute("src") if img_el else None
+                        if img_src and img_src.startswith("//"):
+                            img_src = "https:" + img_src
+
+                        # Approximate title and price from card text
+                        lines = [line.strip() for line in card_text.split("\n") if line.strip()]
+                        title_candidate = lines[0] if lines else f"AliExpress Product #{item_id}"
+                        price_candidate = "N/A"
+                        orig_price_candidate = None
                         
-                        # Extract price
-                        price = "N/A"
-                        orig_price = None
-                        for l in lines:
-                            if currency in l or "$" in l:
-                                if price == "N/A":
-                                    price = l
-                                elif orig_price is None:
-                                    orig_price = l
-                                    
-                        # Extract image if available
-                        img_elem = link.locator("img").first
-                        img_src = await img_elem.get_attribute("src") if await img_elem.count() > 0 else None
-                        
-                        # Clean canonical URL
-                        canonical_url = f"https://www.aliexpress.com/item/{item_id}.html"
-                        
-                        candidate = {
+                        for line in lines:
+                            if any(sym in line for sym in ["$", "AU", "US", "€", "£", "R$", "¥"]):
+                                if price_candidate == "N/A":
+                                    price_candidate = line
+                                elif orig_price_candidate is None:
+                                    orig_price_candidate = line
+
+                        discovered_items[item_id] = {
                             "item_id": item_id,
-                            "title": title,
-                            "price": price,
-                            "original_price": orig_price,
+                            "url": clean_url,
+                            "title": title_candidate,
+                            "price": price_candidate,
+                            "original_price": orig_price_candidate,
                             "image_url": img_src,
-                            "url": canonical_url,
-                            "card_text": " | ".join(lines),
-                            "specs": [],
-                            "body_snippet": "",
+                            "card_text": card_text,
+                            "specs": []
                         }
-                        collected_candidates[item_id] = candidate
-                        
+
+                        session.total_candidates = len(discovered_items)
                         await session.emit_event("candidate_discovered", {
-                            "total_candidates": len(collected_candidates),
-                            "candidate": candidate
+                            "item_id": item_id,
+                            "total_candidates": len(discovered_items),
+                            "title": title_candidate,
+                            "price": price_candidate,
+                            "image_url": img_src
                         })
-                        
-                        if len(collected_candidates) >= max_candidates:
-                            break
-                            
-                except Exception as e:
-                    logger.error(f"Error scraping search query '{query}': {e}")
-                    await session.emit_event("log", {"level": "warn", "message": f"Search error for '{query}': {str(e)}"})
 
-            total_discovered = len(collected_candidates)
-            session.stage = f"Discovered {total_discovered} candidates. Starting Gemini AI deep evaluation..."
-            session.progress_pct = 40
-            await session.emit_event("status_update", {"message": f"Starting deep AI evaluation for {total_discovered} products..."})
+                    except Exception as e:
+                        continue
 
-            # Step 3: Deep Inspection & Gemini AI Criteria Evaluation
-            matched_count = 0
-            candidate_list = list(collected_candidates.values())
-            
-            for idx, item in enumerate(candidate_list, 1):
-                if session.is_cancelled:
-                    break
-                    
-                session.stage = f"Evaluating product {idx}/{total_discovered}: {item['title'][:45]}..."
-                session.progress_pct = 40 + int((idx / max(1, total_discovered)) * 55)
-                
-                # Fetch product detail page
+                query_index += 1
+
+            session.stage = f"Evaluating {len(discovered_items)} product candidates with Gemini AI..."
+            session.progress_pct = 45
+            await session.emit_event("evaluation_phase_started", {"total_to_evaluate": len(discovered_items)})
+
+            evaluated_items: List[ItemDetail] = []
+            candidate_list = list(discovered_items.values())
+
+            for i, cand in enumerate(candidate_list):
+                session.stage = f"Evaluating product {i + 1}/{len(candidate_list)}: {cand['title'][:40]}..."
+                session.progress_pct = 45 + int(((i + 1) / max(len(candidate_list), 1)) * 50)
+
+                # Fetch detailed product specifications and features
                 specs = []
-                body_text = item["card_text"]
-                try:
-                    await session.page.goto(item["url"], wait_until="domcontentloaded", timeout=25000)
-                    await session.page.wait_for_timeout(1000)
-                    await session.page.evaluate("window.scrollBy(0, 1000)")
-                    await session.page.wait_for_timeout(1000)
-                    
-                    # Full title if present
-                    title_elem = await session.page.locator("h1").first.inner_text() if await session.page.locator("h1").count() > 0 else ""
-                    if title_elem and len(title_elem.strip()) > 5:
-                        item["title"] = title_elem.strip()
-                        
-                    # Spec table items
-                    spec_elems = await session.page.locator("[class*='specification--prop'], [class*='specification-item'], [class*='property-item'], [class*='pdp-info-item']").all()
-                    for se in spec_elems:
-                        txt = await se.inner_text()
-                        if txt.strip():
-                            specs.append(txt.strip().replace('\n', ': '))
-                    item["specs"] = specs
-                    
-                    # Body text
-                    body_elem = await session.page.locator("body").inner_text()
-                    body_text = f"{item['card_text']} {body_elem[:4000]}"
-                    item["body_snippet"] = body_text[:2000]
-                    
-                except Exception as e:
-                    logger.warning(f"Error fetching detail for item {item['item_id']}: {e}")
+                body_snippet = cand.get("card_text", "")
 
-                # Call Gemini for strict conditions evaluation
-                evaluation: ProductEvaluation = await ai_evaluator.evaluate_product_criteria(
-                    item_title=item["title"],
-                    item_price=item["price"],
-                    specs=item["specs"],
-                    body_snippet=body_text,
+                try:
+                    await page.goto(cand["url"], wait_until="domcontentloaded", timeout=20000)
+                    await asyncio.sleep(random.uniform(0.8, 1.5))
+
+                    # Parse detailed specs from product page
+                    spec_items = await page.$$("[class*='specification--item--'], [class*='spec--item--'], [class*='prop-item'], li[class*='spec']")
+                    for s in spec_items[:25]:
+                        txt = (await s.text_content() or "").strip()
+                        if txt and ":" in txt:
+                            specs.append(txt)
+
+                    body_text = await page.evaluate("() => document.body.innerText")
+                    if body_text:
+                        body_snippet = body_text[:4000]
+
+                    # Extract better title or price if present
+                    title_el = await page.$("h1")
+                    if title_el:
+                        full_title = (await title_el.text_content() or "").strip()
+                        if len(full_title) > len(cand["title"]):
+                            cand["title"] = full_title
+
+                except Exception as e:
+                    logger.warning(f"Error fetching detail for item {cand['item_id']}: {e}")
+
+                cand["specs"] = specs
+
+                # Gemini AI Evaluation
+                evaluation = await ai_evaluator.evaluate_product_criteria(
+                    item_title=cand["title"],
+                    item_price=cand["price"],
+                    specs=specs,
+                    body_snippet=body_snippet,
                     user_conditions=conditions,
                     api_key=gemini_api_key,
                     model_name=model_name
                 )
-                
-                item["is_match"] = evaluation.is_match
-                item["verdict_reason"] = evaluation.verdict_reason
-                item["criteria_breakdown"] = [c.model_dump() for c in evaluation.criteria_evaluations]
-                
-                if item["is_match"]:
-                    matched_count += 1
-                    
-                session.evaluated_items.append(item)
-                
-                # Emit real-time item evaluation event
+
+                item_detail = ItemDetail(
+                    item_id=cand["item_id"],
+                    title=cand["title"],
+                    price=cand["price"],
+                    original_price=cand["original_price"],
+                    url=cand["url"],
+                    image_url=cand["image_url"],
+                    specs=specs,
+                    is_match=evaluation.is_match,
+                    verdict_reason=evaluation.verdict_reason,
+                    confidence=evaluation.confidence,
+                    criteria_breakdown=[c.dict() for c in evaluation.criteria_evaluations]
+                )
+
+                evaluated_items.append(item_detail)
+                if item_detail.is_match:
+                    session.matched_count += 1
+
+                session.evaluated_count = len(evaluated_items)
+
                 await session.emit_event("item_evaluated", {
-                    "index": idx,
-                    "total": total_discovered,
-                    "item": item,
-                    "matched_count": matched_count
+                    "index": len(evaluated_items),
+                    "total": len(candidate_list),
+                    "item": item_detail.dict(),
+                    "matched_count": session.matched_count
                 })
 
-            # Step 4: Save all items and complete
-            session.stage = "Saving results to database..."
-            session.progress_pct = 98
-            await database.save_items(search_id, session.evaluated_items)
-            await database.update_search_status(search_id, "completed", total_found=total_discovered, total_matched=matched_count)
+            await context.close()
+            await browser.close()
 
-            session.status = "completed"
-            session.stage = f"Search completed! Found {matched_count} matching products out of {total_discovered} candidates."
-            session.progress_pct = 100
-            
-            await session.emit_event("search_completed", {
-                "total_found": total_discovered,
-                "total_matched": matched_count,
-                "items": session.evaluated_items
-            })
+        # Save complete search and evaluated items to SQLite database
+        search_record = {
+            "id": search_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "search_term": ", ".join(all_terms),
+            "conditions": conditions,
+            "ship_country": ship_country,
+            "currency": currency,
+            "total_found": len(discovered_items),
+            "total_matched": session.matched_count,
+            "status": "completed",
+            "items": [item.dict() for item in evaluated_items]
+        }
+
+        await database.save_search(search_record)
+
+        session.status = "completed"
+        session.stage = f"Search completed! {session.matched_count} matching products verified."
+        session.progress_pct = 100
+        await session.emit_event("search_completed", search_record)
 
     except Exception as e:
-        logger.error(f"Search {search_id} failed with error: {e}", exc_info=True)
+        logger.error(f"Search failed for session {search_id}: {e}", exc_info=True)
         session.status = "failed"
-        session.stage = f"Failed: {str(e)}"
-        await database.update_search_status(search_id, "failed")
+        session.stage = f"Search failed: {str(e)[:150]}"
         await session.emit_event("search_failed", {"error": str(e)})
-
-    finally:
-        if session.context:
-            try:
-                await session.context.close()
-            except Exception:
-                pass
-        if session.browser:
-            try:
-                await session.browser.close()
-            except Exception:
-                pass
-
-async def handle_captcha_interaction(search_id: str, action: str, start_x: Optional[float] = None, start_y: Optional[float] = None, end_x: Optional[float] = None, end_y: Optional[float] = None) -> Dict[str, Any]:
-    session = sessions.get(search_id)
-    if not session or not session.page:
-        return {"success": False, "message": "No active session or browser page found."}
-
-    page = session.page
-    try:
-        if action == "drag" and start_x is not None and start_y is not None and end_x is not None and end_y is not None:
-            await page.mouse.move(start_x, start_y)
-            await page.mouse.down()
-            
-            steps = 25
-            for i in range(1, steps + 1):
-                cur_x = start_x + (end_x - start_x) * (i / steps)
-                cur_y = start_y + (end_y - start_y) * (i / steps)
-                await page.mouse.move(cur_x, cur_y)
-                await asyncio.sleep(0.015)
-                
-            await page.mouse.up()
-            await page.wait_for_timeout(2000)
-            
-        elif action == "click" and start_x is not None and start_y is not None:
-            await page.mouse.click(start_x, start_y)
-            await page.wait_for_timeout(1500)
-            
-        elif action == "resolve":
-            session.captcha_resolved_event.set()
-            return {"success": True, "resolved": True, "message": "Resuming scraper..."}
-
-        # Check if CAPTCHA cleared
-        content = await page.content()
-        url = page.url
-        is_still_blocked = check_captcha_needed(content, url)
-        
-        fresh_screenshot = await capture_page_screenshot_b64(page)
-        session.captcha_screenshot_b64 = fresh_screenshot
-
-        if not is_still_blocked:
-            session.is_captcha_active = False
-            session.captcha_resolved_event.set()
-            return {
-                "success": True,
-                "resolved": True,
-                "screenshot": fresh_screenshot,
-                "message": "Challenge solved successfully! Resuming..."
-            }
-        else:
-            return {
-                "success": True,
-                "resolved": False,
-                "screenshot": fresh_screenshot,
-                "message": "Challenge still active. Please try dragging further."
-            }
-
-    except Exception as e:
-        logger.error(f"Error handling captcha interaction: {e}")
-        return {"success": False, "message": str(e)}
