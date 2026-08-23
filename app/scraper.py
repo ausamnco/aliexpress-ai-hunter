@@ -247,6 +247,14 @@ async def run_scraper_job(
             session.active_page = page
             session.active_context = context
 
+            # Warmup session on AliExpress homepage to acquire valid tokens
+            try:
+                logger.info("Initializing session on AliExpress homepage...")
+                await page.goto("https://www.aliexpress.com", wait_until="domcontentloaded", timeout=20000)
+                await asyncio.sleep(1.5)
+            except Exception as e:
+                logger.warning(f"Error during homepage warmup: {e}")
+
             discovered_items: Dict[str, Dict[str, Any]] = {}
             query_index = 0
 
