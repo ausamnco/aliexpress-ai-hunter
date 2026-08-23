@@ -488,7 +488,23 @@
             <span>✅ I've Completed Verification / Resume Search</span>
           </button>
 
-          <button type="button" id="cancel-captcha-btn" class="w-full py-2.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition">
+          <!-- Cookie / Redirect URL Sync Box -->
+          <div class="pt-3 border-t theme-border">
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-nord-4 mb-1.5">
+              1-Click Session Relay (URL or Cookie):
+            </label>
+            <div class="flex gap-2">
+              <input type="text" id="captcha-sync-input" placeholder="Paste AliExpress redirected URL or cookie..." class="flex-1 theme-bg-input border theme-border rounded-xl px-3 py-2 text-xs font-mono text-nord-5 placeholder-nord-3 focus:outline-none focus:border-nord-8">
+              <button type="button" id="apply-sync-btn" class="px-3.5 py-2 rounded-xl bg-nord-8 hover:bg-nord-7 text-nord-0 text-xs font-bold transition flex items-center gap-1">
+                <span>Sync</span>
+              </button>
+            </div>
+            <p class="text-[10px] text-nord-3 mt-1.5 leading-relaxed">
+              If AliExpress redirects after sliding, copy the address bar URL or paste <code class="text-nord-8 font-mono">document.cookie</code> here to immediately pass verification to Docker.
+            </p>
+          </div>
+
+          <button type="button" id="cancel-captcha-btn" class="w-full py-2.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition mt-1">
             Cancel Search
           </button>
         </div>

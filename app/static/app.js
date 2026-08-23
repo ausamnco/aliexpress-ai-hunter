@@ -912,7 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.resolved) {
         hideCaptchaModal();
       } else {
-        alert(data.message || 'Verification is still showing on AliExpress. Please ensure you completed the slider in the tab.');
+        alert(data.message || 'Verification is still showing on AliExpress. Please ensure you completed the slider in the tab, or paste the URL/cookie below.');
         doneVerifyBtn.disabled = false;
         doneVerifyBtn.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4"></i><span>✅ I've Completed Verification / Resume Search</span>`;
         if (window.lucide) lucide.createIcons();
@@ -924,6 +924,64 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.lucide) lucide.createIcons();
     }
   });
+
+  const captchaSyncInput = document.getElementById('captcha-sync-input');
+  const applySyncBtn = document.getElementById('apply-sync-btn');
+
+  async function performSessionSync() {
+    if (!currentSearchId || !captchaSyncInput) return;
+    const rawVal = captchaSyncInput.value.trim();
+    if (!rawVal) return;
+
+    applySyncBtn.disabled = true;
+    applySyncBtn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Syncing...</span>`;
+    if (window.lucide) lucide.createIcons();
+
+    let cookieStr = null;
+    let redirectUrl = null;
+
+    if (rawVal.startsWith('http://') || rawVal.startsWith('https://')) {
+      redirectUrl = rawVal;
+    } else {
+      cookieStr = rawVal;
+    }
+
+    try {
+      const res = await fetch('/api/captcha/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          search_id: currentSearchId,
+          action: 'sync_cookie',
+          cookie_str: cookieStr,
+          redirect_url: redirectUrl
+        })
+      });
+      const data = await res.json();
+
+      if (data.resolved) {
+        hideCaptchaModal();
+      } else {
+        alert(data.message || 'Verification is still showing. Please check the pasted URL/cookie.');
+        applySyncBtn.disabled = false;
+        applySyncBtn.textContent = 'Sync';
+      }
+    } catch (err) {
+      alert('Error syncing session: ' + err.message);
+      applySyncBtn.disabled = false;
+      applySyncBtn.textContent = 'Sync';
+    }
+  }
+
+  if (applySyncBtn) applySyncBtn.addEventListener('click', performSessionSync);
+  if (captchaSyncInput) {
+    captchaSyncInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        performSessionSync();
+      }
+    });
+  }
 
   cancelCaptchaBtn.addEventListener('click', async () => {
     if (!currentSearchId) return;
