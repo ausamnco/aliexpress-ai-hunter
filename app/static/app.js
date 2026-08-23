@@ -1,4 +1,4 @@
-// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Native Slider)
+// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Live AliExpress Challenge)
 
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
@@ -27,11 +27,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let conditionsList = [''];
   let suggestDebounceTimeout = null;
   let activeSuggestIndex = -1;
-
-  // Dedicated Slider Drag State
-  let isDraggingSlider = false;
-  let sliderStartX = 0;
-  let sliderDragDistance = 0;
 
   // Helper to prevent XSS
   function escapeHTML(str) {
@@ -96,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const countExcluded = document.getElementById('count-excluded');
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
 
-  // CAPTCHA Modal & Slider Elements
+  // Live AliExpress Challenge Modal Elements
   const captchaModal = document.getElementById('captcha-modal');
   const captchaSolveView = document.getElementById('captcha-solve-view');
   const captchaFailureView = document.getElementById('captcha-failure-view');
@@ -106,14 +101,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const continueRemainingBtn = document.getElementById('continue-remaining-btn');
   const closeCaptchaModal = document.getElementById('close-captcha-modal');
   const cancelCaptchaBtn = document.getElementById('cancel-captcha-btn');
-  const captchaPreviewImg = document.getElementById('captcha-preview-img');
+  const captchaLiveIframe = document.getElementById('captcha-live-iframe');
+  const openExternalCaptchaBtn = document.getElementById('open-external-captcha-btn');
+  const reloadCaptchaFrameBtn = document.getElementById('reload-captcha-frame-btn');
   const captchaLoadingOverlay = document.getElementById('captcha-loading-overlay');
   const resumeCaptchaBtn = document.getElementById('resume-captcha-btn');
-  const sliderTrack = document.getElementById('slider-track');
-  const sliderHandle = document.getElementById('slider-handle');
-  const sliderProgress = document.getElementById('slider-progress');
-  const sliderDragPct = document.getElementById('slider-drag-pct');
-  const sliderText = document.getElementById('slider-text');
 
   // Detail Modal Elements
   const productDetailModal = document.getElementById('product-detail-modal');
@@ -648,7 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
 
       case 'captcha_required':
-        showCaptchaModal(data.screenshot, data.message);
+        showLiveCaptchaModal(data.proxy_url, data.challenge_url, data.message);
         break;
 
       case 'captcha_cleared':
@@ -840,28 +832,17 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // 13. Dedicated Interactive Slider Component
-  function resetSliderUI() {
-    isDraggingSlider = false;
-    sliderDragDistance = 0;
-    sliderHandle.style.left = '4px';
-    sliderProgress.style.width = '0%';
-    sliderDragPct.textContent = '0%';
-    sliderText.style.opacity = '1';
-    sliderHandle.classList.remove('cursor-grabbing');
-    sliderHandle.classList.add('cursor-grab');
-  }
-
-  function showCaptchaModal(screenshotB64, message) {
-    if (!screenshotB64) return;
+  // 13. Live Actual AliExpress Verification Modal Handlers
+  function showLiveCaptchaModal(proxyUrl, challengeUrl, message) {
     captchaSolveView.classList.remove('hidden');
     captchaFailureView.classList.add('hidden');
     captchaLoadingOverlay.classList.add('hidden');
     captchaModal.classList.remove('hidden');
     captchaModal.classList.add('flex');
 
-    captchaPreviewImg.src = `data:image/jpeg;base64,${screenshotB64}`;
-    resetSliderUI();
+    const liveUrl = proxyUrl || `/api/captcha/live/${currentSearchId}`;
+    captchaLiveIframe.src = liveUrl;
+    openExternalCaptchaBtn.href = challengeUrl || liveUrl;
   }
 
   function showCaptchaFailureModal(message, remainingTerms) {
@@ -889,109 +870,46 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideCaptchaModal() {
     captchaModal.classList.add('hidden');
     captchaModal.classList.remove('flex');
-    resetSliderUI();
+    captchaLiveIframe.src = 'about:blank';
   }
 
   closeCaptchaModal.addEventListener('click', hideCaptchaModal);
 
-  // Slider Mouse & Touch Interaction
-  function startSliderDrag(clientX) {
-    isDraggingSlider = true;
-    sliderStartX = clientX;
-    sliderHandle.classList.remove('cursor-grab');
-    sliderHandle.classList.add('cursor-grabbing');
-    sliderText.style.opacity = '0.4';
-  }
-
-  function moveSliderDrag(clientX) {
-    if (!isDraggingSlider) return;
-    const maxTrackWidth = sliderTrack.clientWidth - sliderHandle.clientWidth - 8;
-    if (maxTrackWidth <= 0) return;
-
-    let delta = clientX - sliderStartX;
-    if (delta < 0) delta = 0;
-    if (delta > maxTrackWidth) delta = maxTrackWidth;
-
-    sliderDragDistance = delta;
-    const pct = Math.round((delta / maxTrackWidth) * 100);
-
-    sliderHandle.style.left = `${delta + 4}px`;
-    sliderProgress.style.width = `${pct}%`;
-    sliderDragPct.textContent = `${pct}%`;
-  }
-
-  async function endSliderDrag() {
-    if (!isDraggingSlider || !currentSearchId) return;
-    isDraggingSlider = false;
-
-    const maxTrackWidth = sliderTrack.clientWidth - sliderHandle.clientWidth - 8;
-    const pct = maxTrackWidth > 0 ? (sliderDragDistance / maxTrackWidth) : 0;
-
-    if (pct < 0.6) {
-      // User didn't slide all the way across, spring back
-      resetSliderUI();
-      return;
+  reloadCaptchaFrameBtn.addEventListener('click', () => {
+    if (captchaLiveIframe.src && captchaLiveIframe.src !== 'about:blank') {
+      captchaLiveIframe.src = captchaLiveIframe.src;
     }
+  });
 
-    // Complete slide action
+  // Listen for message from within the live challenge iframe
+  window.addEventListener('message', async (e) => {
+    if (e.data && e.data.type === 'aliexpress_captcha_passed') {
+      resumeCaptchaBtn.click();
+    }
+  });
+
+  resumeCaptchaBtn.addEventListener('click', async () => {
+    if (!currentSearchId) return;
     captchaLoadingOverlay.classList.remove('hidden');
 
     try {
       const res = await fetch('/api/captcha/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          search_id: currentSearchId,
-          action: 'slide',
-          distance_pct: pct
-        })
+        body: JSON.stringify({ search_id: currentSearchId, action: 'resolve' })
       });
       const data = await res.json();
       captchaLoadingOverlay.classList.add('hidden');
 
       if (data.resolved) {
-        sliderProgress.style.width = '100%';
-        sliderDragPct.textContent = '100%';
-        setTimeout(hideCaptchaModal, 600);
-      } else if (data.screenshot) {
-        captchaPreviewImg.src = `data:image/jpeg;base64,${data.screenshot}`;
-        resetSliderUI();
+        hideCaptchaModal();
+      } else {
+        alert('Verification not yet completed on AliExpress. Please ensure the slider has been dragged and passed.');
       }
     } catch (err) {
       captchaLoadingOverlay.classList.add('hidden');
-      resetSliderUI();
+      hideCaptchaModal();
     }
-  }
-
-  // Mouse Listeners
-  sliderHandle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    startSliderDrag(e.clientX);
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    moveSliderDrag(e.clientX);
-  });
-
-  window.addEventListener('mouseup', () => {
-    endSliderDrag();
-  });
-
-  // Touch Listeners (Mobile / Trackpad)
-  sliderHandle.addEventListener('touchstart', (e) => {
-    if (e.touches.length > 0) {
-      startSliderDrag(e.touches[0].clientX);
-    }
-  });
-
-  window.addEventListener('touchmove', (e) => {
-    if (e.touches.length > 0) {
-      moveSliderDrag(e.touches[0].clientX);
-    }
-  });
-
-  window.addEventListener('touchend', () => {
-    endSliderDrag();
   });
 
   cancelCaptchaBtn.addEventListener('click', async () => {
@@ -1028,20 +946,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } catch (e) {}
     hideCaptchaModal();
-  });
-
-  resumeCaptchaBtn.addEventListener('click', async () => {
-    if (!currentSearchId) return;
-    try {
-      await fetch('/api/captcha/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ search_id: currentSearchId, action: 'resolve' })
-      });
-      hideCaptchaModal();
-    } catch (err) {
-      hideCaptchaModal();
-    }
   });
 
   // 14. History Management

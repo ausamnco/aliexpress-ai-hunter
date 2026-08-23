@@ -1,10 +1,8 @@
 import asyncio
-import base64
 import json
 import logging
 import random
 import time
-import math
 import urllib.parse
 from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
@@ -39,6 +37,8 @@ class ScraperSession:
         self.matched_count = 0
         self.event_queue = asyncio.Queue()
         self.active_page: Optional[Page] = None
+        self.active_context: Optional[BrowserContext] = None
+        self.challenge_url: Optional[str] = None
         self.captcha_event = asyncio.Event()
         self.captcha_resume_event = asyncio.Event()
         self.resume_action = "continue_remaining"
@@ -57,126 +57,6 @@ class ScraperSession:
 
 sessions: Dict[str, ScraperSession] = {}
 
-async def natural_mouse_move_and_drag(page: Page, start_x: float, start_y: float, end_x: float, end_y: float):
-    """
-    Simulates human-like mouse movement with acceleration, deceleration, and micro-jitter.
-    """
-    await page.mouse.move(start_x, start_y)
-    await asyncio.sleep(random.uniform(0.08, 0.18))
-    await page.mouse.down()
-    await asyncio.sleep(random.uniform(0.05, 0.12))
-
-    steps = random.randint(28, 42)
-    for i in range(1, steps + 1):
-        t = i / steps
-        ease = 0.5 * (1 - math.cos(t * math.pi))
-        curr_x = start_x + (end_x - start_x) * ease + random.uniform(-1.2, 1.2)
-        curr_y = start_y + (end_y - start_y) * ease + random.uniform(-1.5, 1.5)
-        await page.mouse.move(curr_x, curr_y)
-        speed_delay = 0.008 + (1 - math.sin(t * math.pi)) * 0.018
-        await asyncio.sleep(speed_delay)
-
-    await page.mouse.move(end_x, end_y)
-    await asyncio.sleep(random.uniform(0.12, 0.25))
-    await page.mouse.up()
-    await asyncio.sleep(0.8)
-
-async def execute_slider_drag(page: Page, distance_pct: float = 1.0) -> bool:
-    """
-    Locates the verification slider on the page/iframe and executes a drag across the track.
-    """
-    try:
-        slider_selectors = [
-            "#nc_1_n1z",
-            ".nc_iconfont.btn_slide",
-            ".btn_slide",
-            "#nc_1_wrapper .btn_slide",
-            ".nc_scale span[id*='n1z']",
-            "span[id*='nc_1_n1z']",
-            "div[id*='nc_1_n1z']"
-        ]
-
-        slider_el = None
-        target_frame = None
-
-        for sel in slider_selectors:
-            el = await page.query_selector(sel)
-            if el and await el.is_visible():
-                slider_el = el
-                break
-
-        if not slider_el:
-            for frame in page.frames:
-                for sel in slider_selectors:
-                    el = await frame.query_selector(sel)
-                    if el and await el.is_visible():
-                        slider_el = el
-                        target_frame = frame
-                        break
-                if slider_el:
-                    break
-
-        if not slider_el:
-            logger.info("Slider element not found for drag execution.")
-            return False
-
-        box = await slider_el.bounding_box()
-        if not box:
-            return False
-
-        # Attempt to get track width
-        track_selectors = ["#nc_1__scale_text", ".nc_scale", ".scale_text", "#nc_1_wrapper"]
-        track_width = 300.0
-        for sel in track_selectors:
-            t_el = await page.query_selector(sel) if not target_frame else await target_frame.query_selector(sel)
-            if t_el and await t_el.is_visible():
-                t_box = await t_el.bounding_box()
-                if t_box and t_box["width"] > 100:
-                    track_width = t_box["width"]
-                    break
-
-        start_x = box["x"] + box["width"] / 2
-        start_y = box["y"] + box["height"] / 2
-        
-        slide_distance = (track_width - box["width"]) * max(0.5, min(distance_pct, 1.05))
-        end_x = start_x + slide_distance
-        end_y = start_y + random.uniform(-2, 2)
-
-        logger.info(f"Sliding verification bar from {start_x:.1f} to {end_x:.1f} (track: {track_width:.1f})")
-        await natural_mouse_move_and_drag(page, start_x, start_y, end_x, end_y)
-        await asyncio.sleep(2.5)
-
-        # Check if cleared
-        if "punish" not in page.url:
-            logger.info("Verification cleared after slide!")
-            return True
-
-        error_el = await page.query_selector(".nc-lang-cnt, #nc_1__scale_text")
-        if error_el:
-            txt = (await error_el.text_content() or "").lower()
-            if "pass" in txt or "success" in txt:
-                return True
-
-        return False
-    except Exception as e:
-        logger.warning(f"Error during slider drag: {e}")
-        return False
-
-async def attempt_automated_slider_solve(page: Page) -> bool:
-    """
-    Attempts to automatically solve the verification puzzle on AliExpress.
-    """
-    try:
-        if "punish" not in page.url:
-            return True
-
-        logger.info("Attempting automated challenge solve...")
-        await asyncio.sleep(1.2)
-        return await execute_slider_drag(page, distance_pct=1.0)
-    except Exception as e:
-        logger.warning(f"Error in automated solve attempt: {e}")
-        return False
-
 async def handle_captcha_interaction(
     search_id: str,
     action: str,
@@ -184,7 +64,7 @@ async def handle_captcha_interaction(
     start_y: Optional[float] = None,
     end_x: Optional[float] = None,
     end_y: Optional[float] = None,
-    distance_pct: Optional[float] = 1.0
+    distance_pct: Optional[float] = None
 ) -> Dict[str, Any]:
     session = sessions.get(search_id)
     if not session or not session.active_page:
@@ -192,26 +72,22 @@ async def handle_captcha_interaction(
 
     page = session.active_page
 
-    if action in ["slide", "drag"]:
+    if action in ["resolve", "check"]:
         try:
-            pct = distance_pct if distance_pct is not None else 1.0
-            solved = await execute_slider_drag(page, pct)
-
-            if solved or "punish" not in page.url:
-                session.captcha_event.set()
-                await session.emit_event("captcha_cleared", {"message": "Verification passed!"})
-                return {"success": True, "resolved": True}
-            else:
-                screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
-                b64_img = base64.b64encode(screenshot_bytes).decode("utf-8")
-                return {"success": True, "resolved": False, "screenshot": b64_img}
+            if "punish" in page.url:
+                # Reload page to check if verification passed
+                await page.reload(wait_until="domcontentloaded", timeout=12000)
+                await asyncio.sleep(1.0)
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            logger.warning(f"Error checking verification status: {e}")
 
-    elif action == "resolve":
-        session.captcha_event.set()
-        await session.emit_event("captcha_cleared", {"message": "Verification submitted."})
-        return {"success": True, "resolved": True}
+        resolved = "punish" not in page.url
+        if resolved:
+            session.captcha_event.set()
+            await session.emit_event("captcha_cleared", {"message": "Verification passed!"})
+            return {"success": True, "resolved": True}
+        else:
+            return {"success": True, "resolved": False, "url": page.url}
 
     elif action == "cancel":
         session.captcha_event.set()
@@ -310,7 +186,7 @@ async def run_scraper_job(
                 }
             )
 
-            # Apply advanced evasions
+            # Apply evasions
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 window.navigator.chrome = { runtime: {} };
@@ -328,6 +204,7 @@ async def run_scraper_job(
             page: Page = await context.new_page()
             await apply_stealth(page)
             session.active_page = page
+            session.active_context = context
 
             discovered_items: Dict[str, Dict[str, Any]] = {}
             query_index = 0
@@ -351,54 +228,60 @@ async def run_scraper_job(
                 # Check for verification challenge
                 is_punish = "punish" in page.url or (await page.query_selector("#nc_1_n1z, .btn_slide") is not None)
                 if is_punish:
-                    logger.info("Verification challenge detected! Executing automated solver...")
-                    
-                    # 1. Attempt automated solver
-                    auto_solved = await attempt_automated_slider_solve(page)
-                    
-                    # 2. If automated solve failed, trigger manual modal
-                    if not auto_solved and "punish" in page.url:
-                        session.stage = "Verification required. Please drag the slider to verify."
-                        screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
-                        b64_img = base64.b64encode(screenshot_bytes).decode("utf-8")
-                        session.captcha_event.clear()
+                    logger.info("Verification challenge detected! Presenting actual AliExpress page to user...")
+                    challenge_url = page.url
+                    if "punish" not in challenge_url:
+                        challenge_url = search_url
 
-                        await session.emit_event("captcha_required", {
-                            "screenshot": b64_img,
-                            "message": "AliExpress verification challenge. Please drag the slider to verify."
+                    session.challenge_url = challenge_url
+                    session.stage = "AliExpress Verification Required. Please complete the challenge on the actual page."
+                    session.captcha_event.clear()
+
+                    await session.emit_event("captcha_required", {
+                        "challenge_url": challenge_url,
+                        "proxy_url": f"/api/captcha/live/{search_id}",
+                        "message": "AliExpress verification challenge required. Please interact with the actual AliExpress page below."
+                    })
+
+                    # Poll and wait up to 180s for user to solve challenge on the actual page
+                    solved = False
+                    start_wait = time.time()
+                    while time.time() - start_wait < 180:
+                        if session.captcha_event.is_set():
+                            solved = True
+                            break
+                        if "punish" not in page.url:
+                            solved = True
+                            session.captcha_event.set()
+                            break
+                        await asyncio.sleep(1.5)
+
+                    # Check if cleared
+                    if solved or "punish" not in page.url:
+                        logger.info("Verification successfully cleared on actual AliExpress page!")
+                        await session.emit_event("captcha_cleared")
+                    else:
+                        remaining = search_queries[query_index + 1:]
+                        session.remaining_terms = remaining
+                        session.captcha_resume_event.clear()
+
+                        logger.warning(f"Verification challenge unresolved. Pausing search. Remaining queries: {remaining}")
+                        await session.emit_event("captcha_failed", {
+                            "failed_term": query,
+                            "remaining_terms": remaining,
+                            "message": f"Verification challenge was not completed for '{query}'."
                         })
 
-                        # Wait up to 120s for manual resolution
                         try:
-                            await asyncio.wait_for(session.captcha_event.wait(), timeout=120.0)
+                            await asyncio.wait_for(session.captcha_resume_event.wait(), timeout=300.0)
                         except asyncio.TimeoutError:
-                            logger.warning("Manual CAPTCHA resolution timed out.")
+                            session.resume_action = "continue_remaining"
 
-                        # Check if verification succeeded
-                        if "punish" in page.url:
-                            remaining = search_queries[query_index + 1:]
-                            session.remaining_terms = remaining
-                            session.captcha_resume_event.clear()
-
-                            logger.warning(f"Verification challenge unresolved. Pausing search. Remaining queries: {remaining}")
-                            await session.emit_event("captcha_failed", {
-                                "failed_term": query,
-                                "remaining_terms": remaining,
-                                "message": f"Verification challenge was not completed for '{query}'."
-                            })
-
-                            try:
-                                await asyncio.wait_for(session.captcha_resume_event.wait(), timeout=300.0)
-                            except asyncio.TimeoutError:
-                                session.resume_action = "continue_remaining"
-
-                            if session.resume_action == "retry":
-                                continue
-                            else:
-                                query_index += 1
-                                continue
+                        if session.resume_action == "retry":
+                            continue
                         else:
-                            await session.emit_event("captcha_cleared")
+                            query_index += 1
+                            continue
 
                 # Scroll down smoothly to trigger lazy loading of product items
                 for scroll_step in range(3):

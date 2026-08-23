@@ -171,6 +171,45 @@ async def perform_captcha_action(req: CaptchaActionRequest):
     )
     return result
 
+@app.get("/api/captcha/live/{search_id}", response_class=HTMLResponse)
+async def get_live_captcha_page(search_id: str):
+    session = scraper.sessions.get(search_id)
+    if not session or not session.active_page:
+        raise HTTPException(status_code=404, detail="Active search session or browser page not found.")
+
+    try:
+        page = session.active_page
+        content = await page.content()
+        
+        base_tag = f'<base href="{page.url}">'
+        inject_script = """
+        <script>
+            // Relay verification completion to parent app
+            setInterval(function() {
+                var el = document.querySelector('.nc-lang-cnt, #nc_1__scale_text, .btn_slide');
+                if (el && (el.innerText.toLowerCase().indexOf('pass') !== -1 || el.innerText.toLowerCase().indexOf('success') !== -1)) {
+                    if (window.parent) window.parent.postMessage({ type: 'aliexpress_captcha_passed' }, '*');
+                }
+            }, 1000);
+        </script>
+        """
+        
+        if "<head>" in content:
+            content = content.replace("<head>", f"<head>\n{base_tag}\n{inject_script}", 1)
+        elif "<html" in content:
+            content = content.replace(">", f">\n<head>{base_tag}\n{inject_script}</head>", 1)
+            
+        return HTMLResponse(
+            content=content,
+            headers={
+                "X-Frame-Options": "ALLOWALL",
+                "Content-Security-Policy": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error serving live AliExpress challenge page: {e}")
+        return HTMLResponse(content=f"<h3>Error loading AliExpress challenge:</h3><p>{str(e)}</p>")
+
 @app.get("/api/history")
 async def get_search_history():
     history = await database.get_all_searches()
