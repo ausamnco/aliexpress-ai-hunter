@@ -6,7 +6,7 @@ import uuid
 import httpx
 from typing import AsyncGenerator
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from app import database
 from app import scraper
 from app import ai_evaluator
-from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest, CaptchaResumeRequest
+from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest, CaptchaResumeRequest, CaptchaMouseEvent
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("aliexpress_ai_hunter")
@@ -163,6 +163,31 @@ async def perform_captcha_action(req: CaptchaActionRequest):
         action=req.action,
         cookie_str=req.cookie_str,
         redirect_url=req.redirect_url
+    )
+    return result
+
+@app.get("/api/captcha/screenshot/{search_id}")
+async def get_captcha_screenshot(search_id: str):
+    img_bytes = await scraper.get_page_screenshot(search_id)
+    if not img_bytes:
+        raise HTTPException(status_code=404, detail="Page not active or screenshot unavailable.")
+    return Response(
+        content=img_bytes,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
+
+@app.post("/api/captcha/mouse")
+async def dispatch_captcha_mouse(req: CaptchaMouseEvent):
+    result = await scraper.handle_mouse_event(
+        search_id=req.search_id,
+        event_type=req.type,
+        x=req.x,
+        y=req.y
     )
     return result
 

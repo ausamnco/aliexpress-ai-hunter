@@ -58,6 +58,43 @@ class ScraperSession:
 
 sessions: Dict[str, ScraperSession] = {}
 
+async def get_page_screenshot(search_id: str) -> Optional[bytes]:
+    session = sessions.get(search_id)
+    if not session or not session.active_page:
+        return None
+    try:
+        return await session.active_page.screenshot(type="jpeg", quality=60)
+    except Exception as e:
+        logger.warning(f"Error capturing page screenshot: {e}")
+        return None
+
+async def handle_mouse_event(search_id: str, event_type: str, x: float, y: float) -> Dict[str, Any]:
+    session = sessions.get(search_id)
+    if not session or not session.active_page:
+        return {"success": False, "message": "No active scraper session or page."}
+
+    page = session.active_page
+    try:
+        if event_type == "down":
+            await page.mouse.move(x, y)
+            await page.mouse.down()
+        elif event_type == "move":
+            await page.mouse.move(x, y)
+        elif event_type == "up":
+            await page.mouse.move(x, y)
+            await page.mouse.up()
+            # After mouseup, check if challenge cleared
+            await asyncio.sleep(1.0)
+            if "punish" not in page.url and (await page.query_selector("#nc_1_n1z, .btn_slide") is None):
+                session.captcha_event.set()
+                await session.emit_event("captcha_cleared", {"message": "Verification passed directly!"})
+                return {"success": True, "cleared": True}
+
+        return {"success": True, "cleared": False}
+    except Exception as e:
+        logger.warning(f"Error handling mouse event: {e}")
+        return {"success": False, "error": str(e)}
+
 async def handle_captcha_interaction(
     search_id: str,
     action: str,

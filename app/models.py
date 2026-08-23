@@ -40,7 +40,7 @@ class ValidateKeyRequest(BaseModel):
 
 class CaptchaActionRequest(BaseModel):
     search_id: str
-    action: str  # "resolve", "sync_cookie", "sync_url", "cancel"
+    action: str  # "resolve", "sync_cookie", "sync_url", "cancel", "done"
     start_x: Optional[float] = None
     start_y: Optional[float] = None
     end_x: Optional[float] = None
@@ -48,6 +48,12 @@ class CaptchaActionRequest(BaseModel):
     distance_pct: Optional[float] = None
     cookie_str: Optional[str] = None
     redirect_url: Optional[str] = None
+
+class CaptchaMouseEvent(BaseModel):
+    search_id: str
+    type: str  # "down", "move", "up", "click"
+    x: float
+    y: float
 
 class CaptchaResumeRequest(BaseModel):
     search_id: str

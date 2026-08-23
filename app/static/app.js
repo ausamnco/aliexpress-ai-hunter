@@ -832,19 +832,148 @@ document.addEventListener('DOMContentLoaded', () => {
     productDetailModal.classList.remove('flex');
   });
 
-  // 13. Direct AliExpress Verification Flow Handlers
+  // 13. Live Interactive Browser Canvas Verification Handlers
+  const captchaCanvas = document.getElementById('captcha-canvas');
+  const canvasLoading = document.getElementById('canvas-loading');
+  const refreshCanvasBtn = document.getElementById('refresh-canvas-btn');
+
+  let canvasStreamInterval = null;
+  let isCanvasDragging = false;
+  let nativeViewport = { width: 1366, height: 768 };
+  let isFetchingFrame = false;
+
+  async function fetchLiveFrame() {
+    if (!currentSearchId || isFetchingFrame || !captchaModal || captchaModal.classList.contains('hidden')) return;
+    isFetchingFrame = true;
+
+    try {
+      const timestamp = Date.now();
+      const imgUrl = `/api/captcha/screenshot/${currentSearchId}?t=${timestamp}`;
+      const img = new Image();
+      img.onload = () => {
+        if (captchaCanvas && captchaCanvas.getContext) {
+          const ctx = captchaCanvas.getContext('2d');
+          if (captchaCanvas.width !== img.naturalWidth || captchaCanvas.height !== img.naturalHeight) {
+            captchaCanvas.width = img.naturalWidth || 1366;
+            captchaCanvas.height = img.naturalHeight || 768;
+            nativeViewport.width = captchaCanvas.width;
+            nativeViewport.height = captchaCanvas.height;
+          }
+          ctx.drawImage(img, 0, 0);
+          if (canvasLoading) canvasLoading.classList.add('hidden');
+        }
+        isFetchingFrame = false;
+      };
+      img.onerror = () => {
+        isFetchingFrame = false;
+      };
+      img.src = imgUrl;
+    } catch (e) {
+      isFetchingFrame = false;
+    }
+  }
+
+  function startCanvasStream() {
+    if (canvasLoading) canvasLoading.classList.remove('hidden');
+    fetchLiveFrame();
+    if (canvasStreamInterval) clearInterval(canvasStreamInterval);
+    canvasStreamInterval = setInterval(fetchLiveFrame, 180);
+  }
+
+  function stopCanvasStream() {
+    if (canvasStreamInterval) {
+      clearInterval(canvasStreamInterval);
+      canvasStreamInterval = null;
+    }
+  }
+
+  function getCanvasPos(e) {
+    if (!captchaCanvas) return { x: 0, y: 0 };
+    const rect = captchaCanvas.getBoundingClientRect();
+    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+    
+    const scaleX = (captchaCanvas.width || 1366) / rect.width;
+    const scaleY = (captchaCanvas.height || 768) / rect.height;
+    
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  }
+
+  async function sendMouseEvent(type, x, y) {
+    if (!currentSearchId) return;
+    try {
+      await fetch('/api/captcha/mouse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          search_id: currentSearchId,
+          type: type,
+          x: x,
+          y: y
+        })
+      });
+      setTimeout(fetchLiveFrame, 60);
+    } catch (e) {}
+  }
+
+  if (captchaCanvas) {
+    captchaCanvas.addEventListener('mousedown', (e) => {
+      isCanvasDragging = true;
+      const pos = getCanvasPos(e);
+      sendMouseEvent('down', pos.x, pos.y);
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isCanvasDragging) return;
+      const pos = getCanvasPos(e);
+      sendMouseEvent('move', pos.x, pos.y);
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (!isCanvasDragging) return;
+      isCanvasDragging = false;
+      const pos = getCanvasPos(e);
+      sendMouseEvent('up', pos.x, pos.y);
+    });
+
+    captchaCanvas.addEventListener('touchstart', (e) => {
+      isCanvasDragging = true;
+      const pos = getCanvasPos(e);
+      sendMouseEvent('down', pos.x, pos.y);
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!isCanvasDragging) return;
+      const pos = getCanvasPos(e);
+      sendMouseEvent('move', pos.x, pos.y);
+    }, { passive: true });
+
+    window.addEventListener('touchend', (e) => {
+      if (!isCanvasDragging) return;
+      isCanvasDragging = false;
+      const pos = getCanvasPos(e);
+      sendMouseEvent('up', pos.x, pos.y);
+    });
+  }
+
+  if (refreshCanvasBtn) {
+    refreshCanvasBtn.addEventListener('click', fetchLiveFrame);
+  }
+
   function showDirectVerificationModal(challengeUrl) {
     currentChallengeUrl = challengeUrl;
     captchaSolveView.classList.remove('hidden');
     captchaFailureView.classList.add('hidden');
-    captchaTabWaitingStatus.classList.add('hidden');
-    doneVerifyBtn.classList.add('hidden');
-    openVerifyTabBtn.classList.remove('hidden');
     captchaModal.classList.remove('hidden');
     captchaModal.classList.add('flex');
+    startCanvasStream();
   }
 
   function showCaptchaFailureModal(message, remainingTerms) {
+    stopCanvasStream();
     captchaSolveView.classList.add('hidden');
     captchaFailureView.classList.remove('hidden');
     captchaFailureMessage.textContent = message || 'AliExpress verification challenge failed.';
@@ -867,120 +996,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function hideCaptchaModal() {
+    stopCanvasStream();
     captchaModal.classList.add('hidden');
     captchaModal.classList.remove('flex');
-    if (tabWatcherInterval) {
-      clearInterval(tabWatcherInterval);
-      tabWatcherInterval = null;
-    }
-  }
-
-  openVerifyTabBtn.addEventListener('click', () => {
-    if (!currentChallengeUrl) return;
-    activeVerifyTab = window.open(currentChallengeUrl, '_blank');
-    
-    captchaTabWaitingStatus.classList.remove('hidden');
-    doneVerifyBtn.classList.remove('hidden');
-    openVerifyTabBtn.classList.add('hidden');
-
-    // Auto-detect when the user finishes and closes the AliExpress tab
-    if (tabWatcherInterval) clearInterval(tabWatcherInterval);
-    tabWatcherInterval = setInterval(() => {
-      if (activeVerifyTab && activeVerifyTab.closed) {
-        clearInterval(tabWatcherInterval);
-        tabWatcherInterval = null;
-        // Trigger session verification
-        doneVerifyBtn.click();
-      }
-    }, 1000);
-  });
-
-  doneVerifyBtn.addEventListener('click', async () => {
-    if (!currentSearchId) return;
-    doneVerifyBtn.disabled = true;
-    doneVerifyBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Validating with AliExpress...</span>`;
-    if (window.lucide) lucide.createIcons();
-
-    try {
-      const res = await fetch('/api/captcha/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ search_id: currentSearchId, action: 'done' })
-      });
-      const data = await res.json();
-
-      if (data.resolved) {
-        hideCaptchaModal();
-      } else {
-        alert(data.message || 'Verification is still showing on AliExpress. Please ensure you completed the slider in the tab, or paste the URL/cookie below.');
-        doneVerifyBtn.disabled = false;
-        doneVerifyBtn.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4"></i><span>✅ I've Completed Verification / Resume Search</span>`;
-        if (window.lucide) lucide.createIcons();
-      }
-    } catch (err) {
-      alert('Error verifying session: ' + err.message);
-      doneVerifyBtn.disabled = false;
-      doneVerifyBtn.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4"></i><span>✅ I've Completed Verification / Resume Search</span>`;
-      if (window.lucide) lucide.createIcons();
-    }
-  });
-
-  const captchaSyncInput = document.getElementById('captcha-sync-input');
-  const applySyncBtn = document.getElementById('apply-sync-btn');
-
-  async function performSessionSync() {
-    if (!currentSearchId || !captchaSyncInput) return;
-    const rawVal = captchaSyncInput.value.trim();
-    if (!rawVal) return;
-
-    applySyncBtn.disabled = true;
-    applySyncBtn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Syncing...</span>`;
-    if (window.lucide) lucide.createIcons();
-
-    let cookieStr = null;
-    let redirectUrl = null;
-
-    if (rawVal.startsWith('http://') || rawVal.startsWith('https://')) {
-      redirectUrl = rawVal;
-    } else {
-      cookieStr = rawVal;
-    }
-
-    try {
-      const res = await fetch('/api/captcha/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          search_id: currentSearchId,
-          action: 'sync_cookie',
-          cookie_str: cookieStr,
-          redirect_url: redirectUrl
-        })
-      });
-      const data = await res.json();
-
-      if (data.resolved) {
-        hideCaptchaModal();
-      } else {
-        alert(data.message || 'Verification is still showing. Please check the pasted URL/cookie.');
-        applySyncBtn.disabled = false;
-        applySyncBtn.textContent = 'Sync';
-      }
-    } catch (err) {
-      alert('Error syncing session: ' + err.message);
-      applySyncBtn.disabled = false;
-      applySyncBtn.textContent = 'Sync';
-    }
-  }
-
-  if (applySyncBtn) applySyncBtn.addEventListener('click', performSessionSync);
-  if (captchaSyncInput) {
-    captchaSyncInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        performSessionSync();
-      }
-    });
   }
 
   cancelCaptchaBtn.addEventListener('click', async () => {
