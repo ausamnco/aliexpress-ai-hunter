@@ -4,60 +4,38 @@ A full-stack, containerized web application that searches AliExpress for any pro
 
 ---
 
-## 🌟 Key Features
+## 🚀 Running with Docker Compose (No repo clone required)
 
-1. **Arbitrary Search Terms & Custom Criteria**:
-   - Search for any category (e.g. *Gaming Headsets*, *Mechanical Keyboards*, *TWS Earbuds*, *Smart Watches*, etc.).
-   - Define any number of strict conditions in natural language (e.g. *"Must have hardware ANC, rotary knob, 2.4GHz USB dongle, under $80 AUD, ships to Australia"*).
+You can run the pre-built image directly on any computer with Docker without cloning the full repository.
 
-2. **Gemini AI Structured Evaluation**:
-   - Uses the official `google-genai` SDK (`gemini-2.5-flash` / `gemini-3.7-flash`).
-   - Breaks down user conditions into granular checks and rigorously determines if each item meets all requirements with cited evidence from specs and product page data.
-   - Users provide their own Gemini API key in the UI (stored securely in browser `localStorage`).
+### 1. Create a `docker-compose.yml` file:
 
-3. **Interactive In-Browser CAPTCHA Solver**:
-   - If AliExpress automated evasion triggers a verification challenge (`punish` slide-to-verify), the backend streams a live viewport screenshot directly into an interactive frontend modal.
-   - Users can drag the slider inside the web browser canvas to resolve the challenge, immediately resuming the scraping pipeline.
+```yaml
+version: '3.8'
 
-4. **Persistent SQLite Database & History**:
-   - Every search is saved with its metadata, candidate listings, AI verdict reasons, condition-by-condition breakdown, and specs.
-   - Dedicated **Saved Searches** tab with quick search recall, detailed product cards, and instant deletion from the database.
-
-5. **Docker Container Ready**:
-   - Single-command container deployment with Playwright Chromium and shared memory pre-configured.
-
----
-
-## 🚀 Quick Start
-
-### Method 1: Running with Docker (Recommended)
-
-```bash
-# Build and run the container with Docker Compose
-docker compose up --build
+services:
+  aliexpress-ai-hunter:
+    image: ghcr.io/ausamnco/aliexpress-ai-hunter:latest
+    container_name: aliexpress-ai-hunter
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./aliexpress-ai-hunter/data:/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_PATH=/data/searches.db
+    shm_size: '2gb'
 ```
 
-Open your browser and navigate to: **`http://localhost:8000`**
+### 2. Start the container:
 
----
+```bash
+docker compose up -d
+```
 
-### Method 2: Running Locally with Python
-
-1. **Activate virtual environment & install requirements**:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   playwright install chromium
-   ```
-
-2. **Start the FastAPI web server**:
-   ```bash
-   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-   ```
-
-3. **Access the Web UI**:
-   Open **`http://localhost:8000`** in your browser.
+### 3. Open the Web UI:
+Navigate to **`http://localhost:8000`** *(or `http://<server-ip>:8000`)* in your web browser.
 
 ---
 
@@ -69,22 +47,20 @@ Open your browser and navigate to: **`http://localhost:8000`**
 
 ---
 
-## 📂 Project Architecture
+## 🌟 Key Features
 
-```
-├── app/
-│   ├── main.py            # FastAPI REST & SSE endpoints
-│   ├── scraper.py         # Playwright stealth scraping & live CAPTCHA streaming
-│   ├── ai_evaluator.py    # Gemini API condition evaluation & keyword generator
-│   ├── database.py        # Async SQLite database engine (aiosqlite)
-│   ├── models.py          # Pydantic data schemas
-│   └── static/
-│       ├── index.html     # Modern SPA web interface (Tailwind CSS)
-│       ├── app.js         # Reactive client logic & interactive CAPTCHA solver
-│       └── styles.css     # Custom UI styling
-├── data/
-│   └── searches.db        # Persistent SQLite database file
-├── Dockerfile             # Container definition with Playwright
-├── docker-compose.yml     # Docker Compose orchestration
-└── requirements.txt       # Python dependencies
-```
+1. **Arbitrary Search Terms & Custom Criteria**:
+   - Search for any category (e.g. *Gaming Headsets*, *Mechanical Keyboards*, *TWS Earbuds*, *Smart Watches*, etc.).
+   - Define any number of strict conditions in natural language (e.g. *"Must have hardware ANC, rotary knob, 2.4GHz USB dongle, under $80 AUD, ships to Australia"*).
+
+2. **Gemini AI Structured Evaluation**:
+   - Uses the official `google-genai` SDK (`gemini-2.5-flash` / `gemini-3.7-flash`).
+   - Breaks down user conditions into granular checks and rigorously determines if each item meets all requirements with cited evidence from specs and product page data.
+
+3. **Interactive In-Browser CAPTCHA Solver**:
+   - If AliExpress automated evasion triggers a verification challenge (`punish` slide-to-verify), the backend streams a live viewport screenshot directly into an interactive frontend modal.
+   - Users can drag the slider inside the web browser canvas to resolve the challenge, immediately resuming the scraping pipeline.
+
+4. **Persistent SQLite Database & History**:
+   - Every search is saved with its metadata, candidate listings, AI verdict reasons, condition-by-condition breakdown, and specs.
+   - Dedicated **Saved Searches** tab with quick search recall, detailed product cards, and instant deletion from the database.

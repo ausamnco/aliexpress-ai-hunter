@@ -2,16 +2,14 @@ version: '3.8'
 
 services:
   aliexpress-ai-hunter:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: aliexpress_ai_hunter
+    image: ghcr.io/ausamnco/aliexpress-ai-hunter:latest
+    container_name: aliexpress-ai-hunter
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      - ./aliexpress-ai-hunter/data:/data
     environment:
       - PYTHONUNBUFFERED=1
-      - DB_PATH=/app/data/searches.db
-    shm_size: '2gb' # Recommended for Chromium in Docker
+      - DB_PATH=/data/searches.db
+    shm_size: '2gb'
