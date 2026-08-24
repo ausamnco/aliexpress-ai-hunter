@@ -461,11 +461,11 @@
         </div>
 
         <!-- Live Interactive Canvas Stream -->
-        <div class="relative w-full aspect-[16/10] bg-nord-0 rounded-2xl overflow-hidden border theme-border flex items-center justify-center select-none shadow-2xl">
-          <canvas id="captcha-canvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>
+        <div class="relative w-full max-w-xl mx-auto aspect-[16/9] bg-nord-0/90 rounded-2xl overflow-hidden border border-nord-8/30 flex items-center justify-center select-none shadow-2xl">
+          <canvas id="captcha-canvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing bg-white"></canvas>
           <div id="canvas-loading" class="absolute inset-0 bg-nord-0/90 backdrop-blur-xs flex flex-col items-center justify-center text-xs text-nord-4 gap-2">
             <i data-lucide="loader-2" class="w-6 h-6 animate-spin text-nord-8"></i>
-            <span class="font-medium">Connecting to live browser stream...</span>
+            <span class="font-medium">Connecting to live slider view...</span>
           </div>
         </div>
 

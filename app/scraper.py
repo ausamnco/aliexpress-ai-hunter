@@ -58,12 +58,27 @@ class ScraperSession:
 
 sessions: Dict[str, ScraperSession] = {}
 
-async def get_page_screenshot(search_id: str) -> Optional[bytes]:
+async def get_page_screenshot(search_id: str) -> Optional[Dict[str, Any]]:
     session = sessions.get(search_id)
     if not session or not session.active_page:
         return None
+    page = session.active_page
     try:
-        return await session.active_page.screenshot(type="jpeg", quality=60)
+        # Find slider button or track to center and zoom on the challenge card
+        btn = page.locator("#nc_1_n1z, .btn_slide, span[id*='nc_1_n1z'], .nc-lang-cnt, #nc_1__scale_text").first
+        if await btn.count() > 0:
+            box = await btn.bounding_box()
+            if box:
+                card_x = max(0, box['x'] - 60)
+                card_y = max(0, box['y'] - 120)
+                card_w = min(1000 - card_x, 460)
+                card_h = min(600 - card_y, 240)
+                clip = {'x': card_x, 'y': card_y, 'width': card_w, 'height': card_h}
+                shot = await page.screenshot(clip=clip, type="jpeg", quality=85)
+                return {"image": shot, "clip": clip}
+
+        shot = await page.screenshot(type="jpeg", quality=75)
+        return {"image": shot, "clip": {'x': 0, 'y': 0, 'width': 1000, 'height': 600}}
     except Exception as e:
         logger.warning(f"Error capturing page screenshot: {e}")
         return None

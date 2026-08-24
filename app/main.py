@@ -168,16 +168,22 @@ async def perform_captcha_action(req: CaptchaActionRequest):
 
 @app.get("/api/captcha/screenshot/{search_id}")
 async def get_captcha_screenshot(search_id: str):
-    img_bytes = await scraper.get_page_screenshot(search_id)
-    if not img_bytes:
+    res = await scraper.get_page_screenshot(search_id)
+    if not res or not res.get("image"):
         raise HTTPException(status_code=404, detail="Page not active or screenshot unavailable.")
+    
+    clip = res.get("clip", {})
     return Response(
-        content=img_bytes,
+        content=res["image"],
         media_type="image/jpeg",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
-            "Expires": "0"
+            "Expires": "0",
+            "X-Clip-X": str(int(clip.get("x", 0))),
+            "X-Clip-Y": str(int(clip.get("y", 0))),
+            "X-Clip-Width": str(int(clip.get("width", 1000))),
+            "X-Clip-Height": str(int(clip.get("height", 600)))
         }
     )
 

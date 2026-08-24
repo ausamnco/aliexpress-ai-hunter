@@ -839,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let canvasStreamInterval = null;
   let isCanvasDragging = false;
-  let nativeViewport = { width: 1366, height: 768 };
+  let currentClip = { x: 0, y: 0, width: 1000, height: 600 };
   let isFetchingFrame = false;
 
   async function fetchLiveFrame() {
@@ -848,23 +848,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const timestamp = Date.now();
-      const imgUrl = `/api/captcha/screenshot/${currentSearchId}?t=${timestamp}`;
+      const res = await fetch(`/api/captcha/screenshot/${currentSearchId}?t=${timestamp}`);
+      if (!res.ok) {
+        isFetchingFrame = false;
+        return;
+      }
+
+      const clipX = parseFloat(res.headers.get('x-clip-x') || '0');
+      const clipY = parseFloat(res.headers.get('x-clip-y') || '0');
+      const clipW = parseFloat(res.headers.get('x-clip-width') || '1000');
+      const clipH = parseFloat(res.headers.get('x-clip-height') || '600');
+      currentClip = { x: clipX, y: clipY, width: clipW, height: clipH };
+
+      const blob = await res.blob();
+      const imgUrl = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = () => {
         if (captchaCanvas && captchaCanvas.getContext) {
           const ctx = captchaCanvas.getContext('2d');
           if (captchaCanvas.width !== img.naturalWidth || captchaCanvas.height !== img.naturalHeight) {
-            captchaCanvas.width = img.naturalWidth || 1366;
-            captchaCanvas.height = img.naturalHeight || 768;
-            nativeViewport.width = captchaCanvas.width;
-            nativeViewport.height = captchaCanvas.height;
+            captchaCanvas.width = img.naturalWidth || 460;
+            captchaCanvas.height = img.naturalHeight || 240;
           }
           ctx.drawImage(img, 0, 0);
           if (canvasLoading) canvasLoading.classList.add('hidden');
         }
+        URL.revokeObjectURL(imgUrl);
         isFetchingFrame = false;
       };
       img.onerror = () => {
+        URL.revokeObjectURL(imgUrl);
         isFetchingFrame = false;
       };
       img.src = imgUrl;
@@ -893,12 +906,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
     
-    const scaleX = (captchaCanvas.width || 1366) / rect.width;
-    const scaleY = (captchaCanvas.height || 768) / rect.height;
+    const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const relY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
     
     return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
+      x: currentClip.x + (relX * currentClip.width),
+      y: currentClip.y + (relY * currentClip.height)
     };
   }
 
