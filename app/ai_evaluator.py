@@ -223,8 +223,6 @@ You are an expert product evaluation assistant. You must rigorously check if the
                 response_schema=ProductEvaluation,
                 temperature=0.1,
             )
-        )
-        
         if response.parsed:
             return response.parsed
             
@@ -245,3 +243,25 @@ You are an expert product evaluation assistant. You must rigorously check if the
                 )
             ]
         )
+
+async def evaluate_product(
+    item: Dict[str, Any],
+    conditions: str,
+    api_key: str,
+    model_name: str = "gemini-3.7-flash"
+) -> ProductEvaluation:
+    title = item.get("title", "")
+    price = item.get("price", "N/A")
+    specs = item.get("specs", [])
+    snippet = json.dumps(item, ensure_ascii=False)
+    
+    return await evaluate_product_criteria(
+        item_title=title,
+        item_price=price,
+        specs=specs,
+        body_snippet=snippet,
+        user_conditions=conditions,
+        api_key=api_key,
+        model_name=model_name
+    )
+
