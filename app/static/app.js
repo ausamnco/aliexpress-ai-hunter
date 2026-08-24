@@ -8,7 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
     apiKey: localStorage.getItem("gemini_api_key") || "",
     shipCountry: localStorage.getItem("ship_country") || "AU",
     currency: localStorage.getItem("currency") || "AUD",
-    modelName: localStorage.getItem("model_name") || "gemini-3.5-flash",
+    modelName: localStorage.getItem("model_name") || "gemini-2.5-flash",
     activeSearchId: null,
     searchTerms: [],
     conditions: [

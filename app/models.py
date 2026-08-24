@@ -33,7 +33,7 @@ class SearchRequest(BaseModel):
     max_candidates: int = Field(default=30, ge=5, le=100)
     ship_country: str = Field(default="AU")
     currency: str = Field(default="AUD")
-    model_name: str = Field(default="gemini-3.5-flash")
+    model_name: str = Field(default="gemini-2.5-flash")
 
 class ValidateKeyRequest(BaseModel):
     api_key: str

@@ -50,20 +50,51 @@ async def run_live_test_suite(
     assert len(variations) > 0, "No variations generated!"
     print("✅ Gemini query generation working.")
 
-    # 4. Test Live Camoufox Stealth Scraping & Extraction
-    print(f"\n[STEP 4/5] Executing Live Camoufox Stealth Search for '{search_query}'...")
-    from camoufox.async_api import AsyncCamoufox
+    # 4. Test Live Stealth Browser Scraping & Extraction
+    print(f"\n[STEP 4/5] Executing Live Stealth Search for '{search_query}'...")
+    from playwright.async_api import async_playwright
+    from playwright_stealth import Stealth
     
     candidates = []
-    async with AsyncCamoufox(headless=True, geoip=True, humanize=True, os="windows") as browser:
-        page = await browser.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        )
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US"
+        )
+        await context.add_cookies([
+            {
+                "name": "aep_usuc_f",
+                "value": "site=glo&province=&city=&c_tp=AUD&region=AU&b_locale=en_US&ae_u_p_s=2",
+                "domain": ".aliexpress.com",
+                "path": "/"
+            },
+            {
+                "name": "xman_us_f",
+                "value": "x_locale=en_US",
+                "domain": ".aliexpress.com",
+                "path": "/"
+            }
+        ])
+        page = await context.new_page()
+        await Stealth().apply_stealth_async(page)
+        
         search_url = f"https://www.aliexpress.com/w/wholesale-2-4g-anc-headset.html?SearchText=2.4g+anc+headset"
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+        await asyncio.sleep(1.0)
+        
+        if "punish" in page.url:
+            print(" -> Challenge detected on test run. Solving automatically...")
+            await scraper.attempt_automated_slider_solve(page)
         
         # Scroll to load candidates
         for _ in range(2):
             await page.evaluate("window.scrollBy(0, 1000);")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
         candidates = await page.evaluate('''() => {
             const results = [];

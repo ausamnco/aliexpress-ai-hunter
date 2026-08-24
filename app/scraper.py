@@ -7,8 +7,8 @@ import re
 import time
 import urllib.parse
 from typing import List, Dict, Any, Optional
-from camoufox.async_api import AsyncCamoufox
-from playwright.async_api import Page, BrowserContext
+from playwright.async_api import async_playwright, Page, BrowserContext
+from playwright_stealth import Stealth
 
 from app import database
 from app import ai_evaluator
@@ -56,25 +56,25 @@ async def natural_mouse_move_and_drag(page: Page, start_x: float, start_y: float
     Simulates human-like mouse movement with acceleration, deceleration, and micro-jitter.
     """
     await page.mouse.move(start_x, start_y)
-    await asyncio.sleep(random.uniform(0.05, 0.15))
+    await asyncio.sleep(random.uniform(0.08, 0.15))
     await page.mouse.down()
     await asyncio.sleep(random.uniform(0.05, 0.1))
 
-    steps = random.randint(28, 42)
+    steps = random.randint(30, 45)
     for i in range(1, steps + 1):
         t = i / steps
         # Sinusoidal ease-in-out curve
         ease = 0.5 * (1 - math.cos(t * math.pi))
-        curr_x = start_x + (end_x - start_x) * ease + random.uniform(-1.2, 1.2)
-        curr_y = start_y + (end_y - start_y) * ease + random.uniform(-1.5, 1.5)
+        curr_x = start_x + (end_x - start_x) * ease + random.uniform(-1.0, 1.0)
+        curr_y = start_y + (end_y - start_y) * ease + random.uniform(-1.2, 1.2)
         await page.mouse.move(curr_x, curr_y)
         speed_delay = 0.008 + (1 - math.sin(t * math.pi)) * 0.012
         await asyncio.sleep(speed_delay)
 
     await page.mouse.move(end_x, end_y)
-    await asyncio.sleep(random.uniform(0.1, 0.25))
+    await asyncio.sleep(random.uniform(0.15, 0.25))
     await page.mouse.up()
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1.0)
 
 async def attempt_automated_slider_solve(page: Page) -> bool:
     """
@@ -98,7 +98,7 @@ async def attempt_automated_slider_solve(page: Page) -> bool:
         ]
 
         slider_el = None
-        for _ in range(12):
+        for _ in range(10):
             for sel in slider_selectors:
                 el = await page.query_selector(sel)
                 if el and await el.is_visible():
@@ -124,18 +124,21 @@ async def attempt_automated_slider_solve(page: Page) -> bool:
         if not box:
             return False
 
-        wrapper = await page.query_selector("#nc_1_wrapper, #nocaptcha")
+        wrapper = await page.query_selector("#nc_1_wrapper, .nc_wrapper")
         wrapper_box = await wrapper.bounding_box() if wrapper else None
-        track_width = (wrapper_box["width"] - box["width"]) if wrapper_box else 260.0
+        if wrapper_box and 100 < wrapper_box["width"] < 600:
+            track_width = wrapper_box["width"] - box["width"]
+        else:
+            track_width = 258.0
 
         start_x = box["x"] + box["width"] / 2
         start_y = box["y"] + box["height"] / 2
-        end_x = start_x + max(250.0, track_width)
+        end_x = start_x + min(280.0, max(240.0, track_width))
         end_y = start_y
 
-        logger.info(f"Sliding from ({start_x:.1f}, {start_y:.1f}) to ({end_x:.1f}, {end_y:.1f})...")
+        logger.info(f"Sliding from ({start_x:.1f}, {start_y:.1f}) to ({end_x:.1f}, {end_y:.1f}) [track={track_width:.1f}px]...")
         await natural_mouse_move_and_drag(page, start_x, start_y, end_x, end_y)
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(2.0)
 
         if "punish" not in page.url:
             logger.info("Slider challenge successfully solved!")
@@ -154,11 +157,13 @@ async def run_scraper_job(
     max_candidates: int = 30,
     ship_country: str = "AU",
     currency: str = "AUD",
-    model_name: str = "gemini-3.5-flash",
+    model_name: str = "gemini-2.5-flash",
     search_terms: Optional[List[str]] = None
 ):
-    session = ScraperSession(search_id)
-    sessions[search_id] = session
+    session = sessions.get(search_id)
+    if not session:
+        session = ScraperSession(search_id)
+        sessions[search_id] = session
 
     try:
         # Create search in DB
@@ -205,28 +210,43 @@ async def run_scraper_job(
         if session.is_cancelled:
             return
 
-        session.stage = "Launching Camoufox stealth browser engine..."
+        session.stage = "Launching high-performance stealth browser engine..."
         session.progress_pct = 10
         await session.emit_event("progress_update", {"message": session.stage})
 
         discovered_candidates: Dict[str, Dict[str, Any]] = {}
 
-        # Launch Camoufox Stealth Firefox Browser
-        async with AsyncCamoufox(
-            headless=True,
-            geoip=True,
-            humanize=True,
-            os="windows"
-        ) as browser:
-            page = await browser.new_page()
-            session.active_page = page
+        # Launch Playwright Chromium Shell with Stealth
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-blink-features=AutomationControlled"
+                ]
+            )
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="Australia/Sydney"
+            )
 
             # Set localization cookie
             try:
-                await page.context.add_cookies([
+                await context.add_cookies([
                     {
                         "name": "aep_usuc_f",
                         "value": f"site=glo&province=&city=&c_tp={currency}&region={ship_country}&b_locale=en_US&ae_u_p_s=2",
+                        "domain": ".aliexpress.com",
+                        "path": "/"
+                    },
+                    {
+                        "name": "xman_us_f",
+                        "value": "x_locale=en_US",
                         "domain": ".aliexpress.com",
                         "path": "/"
                     }
@@ -234,11 +254,16 @@ async def run_scraper_job(
             except Exception as e:
                 logger.warning(f"Could not set preliminary cookies: {e}")
 
+            page = await context.new_page()
+            stealth = Stealth()
+            await stealth.apply_stealth_async(page)
+            session.active_page = page
+
             for q_idx, query in enumerate(search_queries):
                 if len(discovered_candidates) >= max_candidates or session.is_cancelled:
                     break
 
-                session.stage = f"Searching AliExpress for '{query}' (Camoufox Stealth)..."
+                session.stage = f"Searching AliExpress for '{query}'..."
                 session.progress_pct = 12 + int((q_idx / len(search_queries)) * 30)
                 await session.emit_event("query_started", {"query": query, "query_index": q_idx + 1})
 
@@ -247,8 +272,8 @@ async def run_scraper_job(
                 search_url = f"https://www.aliexpress.com/w/wholesale-{slug}.html?SearchText={encoded_query}"
 
                 try:
-                    await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-                    await asyncio.sleep(random.uniform(1.0, 1.8))
+                    await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+                    await asyncio.sleep(random.uniform(0.8, 1.4))
 
                     # Check if CAPTCHA challenge appeared
                     if "punish" in page.url:
@@ -258,20 +283,20 @@ async def run_scraper_job(
 
                         solved = await attempt_automated_slider_solve(page)
                         if not solved:
-                            session.stage = "Awaiting manual verification slider in modal..."
+                            session.stage = "Awaiting verification slider in modal..."
                             await session.emit_event("captcha_required", {"url": page.url})
                             try:
-                                await asyncio.wait_for(session.captcha_resume_event.wait(), timeout=90.0)
+                                await asyncio.wait_for(session.captcha_resume_event.wait(), timeout=15.0)
                             except asyncio.TimeoutError:
                                 logger.warning("Verification modal timed out, skipping to next query.")
                             session.captcha_resume_event.clear()
 
                     # Scroll down to trigger lazy loading of products
-                    for _ in range(3):
+                    for _ in range(2):
                         if session.is_cancelled:
                             break
                         await page.evaluate("window.scrollBy(0, 1000);")
-                        await asyncio.sleep(0.4)
+                        await asyncio.sleep(0.3)
 
                     # Extract products directly from DOM
                     extracted = await page.evaluate('''() => {
@@ -316,13 +341,16 @@ async def run_scraper_job(
                     logger.warning(f"Error scraping '{query}': {e}")
                     continue
 
+            await context.close()
+            await browser.close()
+
         if session.is_cancelled:
             logger.info(f"Search {search_id} cancelled.")
             return
 
         candidate_list = list(discovered_candidates.values())[:max_candidates]
         if not candidate_list:
-            session.stage = "No products found for this search. Try a broader search keyword."
+            session.stage = "No products found for this search. Try broader search terms."
             await session.emit_event("progress_update", {"message": session.stage})
         else:
             session.stage = f"Discovered {len(candidate_list)} products. Running parallel AI evaluation with {model_name}..."

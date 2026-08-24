@@ -108,6 +108,10 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
     search_id = str(uuid.uuid4())
     primary_term = terms[0].strip()
     
+    # Initialize session synchronously to eliminate race conditions on /stream/{id}
+    session = scraper.ScraperSession(search_id)
+    scraper.sessions[search_id] = session
+    
     background_tasks.add_task(
         scraper.run_scraper_job,
         search_id=search_id,
