@@ -30,31 +30,18 @@ class SearchRequest(BaseModel):
     search_terms: Optional[List[str]] = []
     conditions: str
     gemini_api_key: str
+    scraping_provider: str = Field(default="zenrows")  # "zenrows", "scrapfly", "scraperapi", "custom"
+    scraping_api_key: Optional[str] = ""
+    custom_gateway_url: Optional[str] = ""
     max_candidates: int = Field(default=30, ge=5, le=100)
     ship_country: str = Field(default="AU")
     currency: str = Field(default="AUD")
-    model_name: str = Field(default="gemini-2.5-flash")
+    model_name: str = Field(default="gemini-3.7-flash")
 
 class ValidateKeyRequest(BaseModel):
     api_key: str
 
-class CaptchaActionRequest(BaseModel):
-    search_id: str
-    action: str  # "resolve", "sync_cookie", "sync_url", "cancel", "done"
-    start_x: Optional[float] = None
-    start_y: Optional[float] = None
-    end_x: Optional[float] = None
-    end_y: Optional[float] = None
-    distance_pct: Optional[float] = None
-    cookie_str: Optional[str] = None
-    redirect_url: Optional[str] = None
-
-class CaptchaMouseEvent(BaseModel):
-    search_id: str
-    type: str  # "down", "move", "up", "click"
-    x: float
-    y: float
-
-class CaptchaResumeRequest(BaseModel):
-    search_id: str
-    action: str  # "retry", "continue_remaining", "cancel"
+class ValidateGatewayRequest(BaseModel):
+    provider: str
+    api_key: str
+    custom_gateway_url: Optional[str] = None

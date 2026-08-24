@@ -6,7 +6,7 @@ import uuid
 import httpx
 from typing import AsyncGenerator
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from app import database
 from app import scraper
 from app import ai_evaluator
-from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest, CaptchaResumeRequest, CaptchaMouseEvent
+from app.models import SearchRequest, ValidateKeyRequest, ValidateGatewayRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("aliexpress_ai_hunter")
@@ -58,6 +58,15 @@ async def get_gemini_models(req: ValidateKeyRequest):
     models = await ai_evaluator.list_available_models(req.api_key.strip())
     return {"models": models}
 
+@app.post("/api/validate-gateway")
+async def validate_scraping_gateway(req: ValidateGatewayRequest):
+    result = await scraper.GatewayScraperClient.validate_gateway(
+        provider=req.provider,
+        api_key=req.api_key,
+        custom_gateway_url=req.custom_gateway_url
+    )
+    return result
+
 @app.get("/api/suggestions")
 async def get_search_suggestions(q: str = Query("", min_length=1)):
     if not q.strip():
@@ -100,6 +109,9 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
         search_terms=terms,
         conditions=req.conditions.strip(),
         gemini_api_key=req.gemini_api_key.strip(),
+        scraping_provider=req.scraping_provider.strip().lower(),
+        scraping_api_key=(req.scraping_api_key or "").strip(),
+        custom_gateway_url=(req.custom_gateway_url or "").strip(),
         max_candidates=req.max_candidates,
         ship_country=req.ship_country.strip().upper(),
         currency=req.currency.strip().upper(),
@@ -111,11 +123,6 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
         "status": "started",
         "message": f"Search started for {len(terms)} search term(s) with {req.max_candidates} max candidates."
     }
-
-@app.post("/api/captcha/resume")
-async def resume_captcha_failure(req: CaptchaResumeRequest):
-    result = await scraper.resume_after_captcha_failure(req.search_id, req.action)
-    return result
 
 @app.get("/api/search/stream/{search_id}")
 async def stream_search_events(search_id: str):
@@ -137,11 +144,11 @@ async def stream_search_events(search_id: str):
                     event = await asyncio.wait_for(session.event_queue.get(), timeout=30.0)
                     yield f"data: {json.dumps(event)}\n\n"
                     
-                    if event.get("type") in ["search_completed", "search_failed"]:
+                    if event.get("type") in ["search_completed", "search_error", "stream_end"]:
                         break
                 except asyncio.TimeoutError:
                     yield f": keepalive\n\n"
-                    if session.status in ["completed", "failed"]:
+                    if session.status in ["completed", "error"]:
                         break
         except asyncio.CancelledError:
             logger.info(f"Client disconnected from SSE stream for {search_id}")
@@ -155,173 +162,6 @@ async def stream_search_events(search_id: str):
             "X-Accel-Buffering": "no",
         }
     )
-
-@app.post("/api/captcha/action")
-async def perform_captcha_action(req: CaptchaActionRequest):
-    result = await scraper.handle_captcha_interaction(
-        search_id=req.search_id,
-        action=req.action,
-        cookie_str=req.cookie_str,
-        redirect_url=req.redirect_url
-    )
-    return result
-
-@app.get("/api/captcha/screenshot/{search_id}")
-async def get_captcha_screenshot(search_id: str):
-    res = await scraper.get_page_screenshot(search_id)
-    if not res or not res.get("image"):
-        raise HTTPException(status_code=404, detail="Page not active or screenshot unavailable.")
-    
-    clip = res.get("clip", {})
-    return Response(
-        content=res["image"],
-        media_type="image/jpeg",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-            "X-Clip-X": str(int(clip.get("x", 0))),
-            "X-Clip-Y": str(int(clip.get("y", 0))),
-            "X-Clip-Width": str(int(clip.get("width", 1000))),
-            "X-Clip-Height": str(int(clip.get("height", 600)))
-        }
-    )
-
-@app.post("/api/captcha/mouse")
-async def dispatch_captcha_mouse(req: CaptchaMouseEvent):
-    result = await scraper.handle_mouse_event(
-        search_id=req.search_id,
-        event_type=req.type,
-        x=req.x,
-        y=req.y
-    )
-    return result
-
-@app.get("/api/captcha/verify/{search_id}", response_class=HTMLResponse)
-async def get_verify_tab_page(search_id: str):
-    session = scraper.sessions.get(search_id)
-    if not session or not session.active_page:
-        raise HTTPException(status_code=404, detail="Active search session or browser page not found.")
-
-    try:
-        page = session.active_page
-        challenge_url = page.url
-        raw_content = await page.content()
-
-        base_tag = f'<base href="{challenge_url}">'
-        
-        bridge_script = """
-        <script>
-        (function() {
-            var searchId = "__SEARCH_ID__";
-            var completed = false;
-
-            async function notifyComplete(extraCookies) {
-                if (completed) return;
-                completed = true;
-                
-                var cookies = extraCookies || document.cookie || "";
-                var currentUrl = window.location.href;
-
-                var banner = document.getElementById("ai-verify-banner");
-                if (banner) {
-                    banner.style.background = "#A3BE8C";
-                    banner.style.color = "#2E3440";
-                    banner.innerHTML = "<strong>✅ Verification Complete! Closing tab and returning to search...</strong>";
-                }
-
-                try {
-                    await fetch('/api/captcha/action', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            search_id: searchId,
-                            action: 'sync_cookie',
-                            cookie_str: cookies,
-                            redirect_url: currentUrl
-                        })
-                    });
-                } catch(e) {}
-
-                if (window.opener) {
-                    try {
-                        window.opener.postMessage({
-                            type: 'verification_completed',
-                            search_id: searchId,
-                            cookie_str: cookies,
-                            redirect_url: currentUrl
-                        }, '*');
-                    } catch(e) {}
-                }
-
-                setTimeout(function() {
-                    window.close();
-                }, 600);
-            }
-
-            setInterval(function() {
-                if (completed) return;
-
-                var textEl = document.querySelector('.nc-lang-cnt, #nc_1__scale_text, .btn_slide');
-                if (textEl) {
-                    var txt = (textEl.innerText || "").toLowerCase();
-                    if (txt.indexOf('pass') !== -1 || txt.indexOf('success') !== -1 || txt.indexOf('verified') !== -1) {
-                        notifyComplete();
-                    }
-                }
-
-                if (document.cookie && document.cookie.indexOf('x5sec=') !== -1) {
-                    notifyComplete();
-                }
-            }, 800);
-
-            window.__ai_hunter_complete = function() {
-                notifyComplete();
-            };
-        })();
-        </script>
-        """.replace("__SEARCH_ID__", search_id)
-
-        header_banner = """
-        <div id="ai-verify-banner" style="position: sticky; top: 0; left: 0; right: 0; z-index: 999999; background: #3B4252; color: #ECEFF4; padding: 12px 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #88C0D0; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 20px;">🛡️</span>
-            <div>
-              <div style="font-weight: bold; font-size: 14px;">AliExpress Verification Required</div>
-              <div style="font-size: 12px; opacity: 0.85;">Please slide the verification bar below. Once passed, this tab will automatically close and resume your search.</div>
-            </div>
-          </div>
-          <button onclick="window.__ai_hunter_complete()" style="background: #88C0D0; color: #2E3440; font-weight: bold; border: none; padding: 8px 16px; border-radius: 8px; font-size: 12px; cursor: pointer; transition: all 0.2s;">
-            I've Solved It / Done
-          </button>
-        </div>
-        """
-
-        content = raw_content
-        if "<head>" in content:
-            content = content.replace("<head>", f"<head>\n{base_tag}\n{bridge_script}", 1)
-        elif "<html" in content:
-            content = content.replace(">", f">\n<head>{base_tag}\n{bridge_script}</head>", 1)
-
-        if "<body>" in content:
-            content = content.replace("<body>", f"<body>\n{header_banner}", 1)
-        elif "<body " in content:
-            idx = content.find(">", content.find("<body"))
-            if idx != -1:
-                content = content[:idx+1] + "\n" + header_banner + content[idx+1:]
-        else:
-            content = header_banner + "\n" + content
-
-        return HTMLResponse(
-            content=content,
-            headers={
-                "X-Frame-Options": "ALLOWALL",
-                "Content-Security-Policy": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;"
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error serving verification tab: {e}")
-        return HTMLResponse(content=f"<h3>Error loading AliExpress challenge:</h3><p>{str(e)}</p>")
 
 @app.get("/api/history")
 async def get_search_history():

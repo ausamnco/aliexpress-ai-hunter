@@ -1,4 +1,4 @@
-// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Multi-Term Chips & Direct AliExpress Verification Flow)
+// AliExpress AI Product Hunter - Frontend Application (Nord Theme, Scraping Gateway & Gemini AI Architecture)
 
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide) {
@@ -18,12 +18,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let currentApiKey = localStorage.getItem('gemini_api_key') || '';
+  let currentGatewayProvider = localStorage.getItem('scraping_provider') || 'zenrows';
+  let currentGatewayKey = localStorage.getItem('scraping_api_key') || '';
+  let currentCustomGatewayUrl = localStorage.getItem('custom_gateway_url') || '';
   let currentTheme = localStorage.getItem('app_theme') || 'dark';
   let activeEventSource = null;
   let currentSearchId = null;
-  let currentChallengeUrl = null;
-  let activeVerifyTab = null;
-  let tabWatcherInterval = null;
   let activeProducts = [];
   let activeFilter = 'all';
   let searchTermsList = [];
@@ -64,6 +64,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const apiKeyBtnText = document.getElementById('api-key-btn-text');
   const keyValidationMessage = document.getElementById('key-validation-message');
 
+  // Gateway Modal Elements
+  const openGatewayBtn = document.getElementById('open-gateway-btn');
+  const gatewayModal = document.getElementById('gateway-modal');
+  const closeGatewayModal = document.getElementById('close-gateway-modal');
+  const gatewayForm = document.getElementById('gateway-form');
+  const gatewayProviderSelect = document.getElementById('gateway-provider-select');
+  const gatewayKeyInput = document.getElementById('gateway-key-input');
+  const customGatewayUrlGroup = document.getElementById('custom-gateway-url-group');
+  const customGatewayUrlInput = document.getElementById('custom-gateway-url-input');
+  const testGatewayBtn = document.getElementById('test-gateway-btn');
+  const gatewayIndicator = document.getElementById('gateway-indicator');
+  const gatewayValidationMessage = document.getElementById('gateway-validation-message');
+
   // Search Form Elements
   const searchForm = document.getElementById('search-form');
   const searchTermInput = document.getElementById('search-term-input');
@@ -94,19 +107,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const countExcluded = document.getElementById('count-excluded');
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
 
-  // Verification Modal Elements
-  const captchaModal = document.getElementById('captcha-modal');
-  const captchaSolveView = document.getElementById('captcha-solve-view');
-  const captchaFailureView = document.getElementById('captcha-failure-view');
-  const captchaFailureMessage = document.getElementById('captcha-failure-message');
-  const remainingTermsList = document.getElementById('remaining-terms-list');
-  const retryCaptchaBtn = document.getElementById('retry-captcha-btn');
-  const continueRemainingBtn = document.getElementById('continue-remaining-btn');
-  const cancelCaptchaBtn = document.getElementById('cancel-captcha-btn');
-  const openVerifyTabBtn = document.getElementById('open-verify-tab-btn');
-  const doneVerifyBtn = document.getElementById('done-verify-btn');
-  const captchaTabWaitingStatus = document.getElementById('captcha-tab-waiting-status');
-
   // Detail Modal Elements
   const productDetailModal = document.getElementById('product-detail-modal');
   const closeDetailModal = document.getElementById('close-detail-modal');
@@ -117,345 +117,247 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalCriteriaList = document.getElementById('modal-criteria-list');
   const modalSpecsList = document.getElementById('modal-specs-list');
 
-  // History Grid Elements
+  // History Elements
   const historyGrid = document.getElementById('history-grid');
   const historyEmptyState = document.getElementById('history-empty-state');
-  const refreshHistoryBtn = document.getElementById('refresh-history-btn');
 
-  // 1. Theme Management (Nord Dark & Light)
+  // 1. Theme Management
   function applyTheme(theme) {
     currentTheme = theme;
     localStorage.setItem('app_theme', theme);
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-      themeIconDark.classList.remove('hidden');
-      themeIconLight.classList.add('hidden');
+    if (theme === 'light') {
+      document.documentElement.classList.add('light-theme');
+      if (themeIconDark) themeIconDark.classList.remove('hidden');
+      if (themeIconLight) themeIconLight.classList.add('hidden');
     } else {
-      document.documentElement.classList.remove('dark');
-      themeIconDark.classList.add('hidden');
-      themeIconLight.classList.remove('hidden');
+      document.documentElement.classList.remove('light-theme');
+      if (themeIconDark) themeIconDark.classList.add('hidden');
+      if (themeIconLight) themeIconLight.classList.remove('hidden');
     }
   }
+
   applyTheme(currentTheme);
 
-  themeToggleBtn.addEventListener('click', () => {
-    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
-  });
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+      applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    });
+  }
 
   // 2. Navigation Tabs
   navSearchTab.addEventListener('click', () => {
     navSearchTab.classList.add('active');
-    navSearchTab.classList.remove('opacity-70');
     navHistoryTab.classList.remove('active');
-    navHistoryTab.classList.add('opacity-70');
     searchSection.classList.remove('hidden');
     historySection.classList.add('hidden');
   });
 
   navHistoryTab.addEventListener('click', () => {
     navHistoryTab.classList.add('active');
-    navHistoryTab.classList.remove('opacity-70');
     navSearchTab.classList.remove('active');
-    navSearchTab.classList.add('opacity-70');
     historySection.classList.remove('hidden');
     searchSection.classList.add('hidden');
     loadHistory();
   });
 
-  // 3. Gmail-Style Search Term(s) Chips Box
-  function renderSearchChips() {
-    searchChipsContainer.innerHTML = '';
-    if (searchTermsList.length === 0) {
-      searchChipsContainer.innerHTML = `<span id="chips-empty-hint" class="text-xs text-nord-3 italic px-1 py-0.5">No search terms confirmed yet. Type above and press Enter.</span>`;
-      return;
-    }
-
-    searchTermsList.forEach((term, idx) => {
-      const chip = document.createElement('div');
-      chip.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-nord-8/15 border border-nord-8/30 text-nord-8 text-xs font-semibold animate-in fade-in zoom-in-95 duration-100';
-      chip.innerHTML = `
-        <span class="chip-text cursor-pointer hover:underline" title="Click to edit">${escapeHTML(term)}</span>
-        <button type="button" class="remove-chip-btn text-nord-8/70 hover:text-nord-11 transition" data-index="${idx}">
-          <i data-lucide="x" class="w-3 h-3"></i>
-        </button>
-      `;
-      searchChipsContainer.appendChild(chip);
-    });
-
-    if (window.lucide) lucide.createIcons();
-
-    // Attach Remove Listeners
-    searchChipsContainer.querySelectorAll('.remove-chip-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const index = parseInt(btn.dataset.index, 10);
-        searchTermsList.splice(index, 1);
-        renderSearchChips();
-      });
-    });
-
-    // Attach Edit Listeners
-    searchChipsContainer.querySelectorAll('.chip-text').forEach((el, idx) => {
-      el.addEventListener('click', () => {
-        const term = searchTermsList[idx];
-        searchTermInput.value = term;
-        searchTermsList.splice(idx, 1);
-        renderSearchChips();
-        searchTermInput.focus();
-      });
-    });
-  }
-
-  function addSearchTerm(rawTerm) {
-    if (!rawTerm) return;
-    const clean = rawTerm.replace(/,/g, '').trim();
-    if (clean && !searchTermsList.includes(clean)) {
-      searchTermsList.push(clean);
-      renderSearchChips();
-    }
-  }
-
-  searchTermInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      if (activeSuggestIndex >= 0 && suggestionsDropdown.children[activeSuggestIndex]) {
-        return;
-      }
-      e.preventDefault();
-      addSearchTerm(searchTermInput.value);
-      searchTermInput.value = '';
-      suggestionsDropdown.classList.add('hidden');
-    }
-  });
-
-  searchTermInput.addEventListener('blur', () => {
-    setTimeout(() => {
-      if (searchTermInput.value.trim()) {
-        addSearchTerm(searchTermInput.value);
-        searchTermInput.value = '';
-      }
-    }, 200);
-  });
-
-  // 4. Dynamic Numbered Criteria Fields (Max 10)
-  function renderConditions() {
-    conditionsContainer.innerHTML = '';
-    conditionCountBadge.textContent = `${conditionsList.length} / 10`;
-
-    conditionsList.forEach((condText, idx) => {
-      const row = document.createElement('div');
-      row.className = 'flex items-center gap-2';
-
-      row.innerHTML = `
-        <div class="w-7 h-9 rounded-xl theme-bg-input border theme-border flex items-center justify-center text-xs font-mono font-bold text-nord-8 flex-shrink-0">
-          ${idx + 1}
-        </div>
-        <input type="text" value="${escapeHTML(condText)}" placeholder="e.g. Must have hardware ANC, not ENC" class="condition-input flex-1 theme-bg-input border theme-border rounded-xl px-3.5 py-2 text-xs text-nord-5 placeholder-nord-3 focus:outline-none focus:border-nord-8" data-index="${idx}">
-        ${idx > 0 ? `
-          <button type="button" class="remove-cond-btn p-2 rounded-xl text-nord-11 hover:bg-nord-11/10 transition border border-nord-11/20 flex-shrink-0" data-index="${idx}" title="Remove condition">
-            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-          </button>
-        ` : ''}
-      `;
-
-      conditionsContainer.appendChild(row);
-    });
-
-    if (window.lucide) lucide.createIcons();
-
-    document.querySelectorAll('.condition-input').forEach(input => {
-      input.addEventListener('input', (e) => {
-        const index = parseInt(e.target.dataset.index, 10);
-        conditionsList[index] = e.target.value;
-      });
-    });
-
-    document.querySelectorAll('.remove-cond-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const index = parseInt(btn.dataset.index, 10);
-        conditionsList.splice(index, 1);
-        renderConditions();
-      });
-    });
-
-    if (conditionsList.length >= 10) {
-      addConditionBtn.disabled = true;
-      addConditionBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    } else {
-      addConditionBtn.disabled = false;
-      addConditionBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-    }
-  }
-
-  addConditionBtn.addEventListener('click', () => {
-    if (conditionsList.length < 10) {
-      conditionsList.push('');
-      renderConditions();
-      const inputs = document.querySelectorAll('.condition-input');
-      if (inputs.length > 0) inputs[inputs.length - 1].focus();
-    }
-  });
-
-  renderConditions();
-
-  // 5. Destination Country & Currency Auto-Sync
+  // 3. Country & Currency Synchronization
   shipCountrySelect.addEventListener('change', () => {
-    const selectedCountry = shipCountrySelect.value;
-    const autoCurrency = COUNTRY_CURRENCY_MAP[selectedCountry] || 'USD';
-    const matchingOption = currencySelect.querySelector(`option[value="${autoCurrency}"]`);
-    if (matchingOption) {
-      currencySelect.value = autoCurrency;
-    } else {
-      currencySelect.value = 'USD';
-    }
+    const country = shipCountrySelect.value;
+    const recommendedCurrency = COUNTRY_CURRENCY_MAP[country] || 'USD';
+    currencySelect.value = recommendedCurrency;
   });
 
-  // 6. Generic Search Term Live Autofill / Spell Suggestion
-  searchTermInput.addEventListener('input', () => {
-    const query = searchTermInput.value.trim();
-    if (suggestDebounceTimeout) clearTimeout(suggestDebounceTimeout);
-
-    if (query.length < 2) {
-      suggestionsDropdown.classList.add('hidden');
-      return;
-    }
-
-    suggestDebounceTimeout = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/suggestions?q=${encodeURIComponent(query)}`);
-        const data = await res.json();
-        const suggestions = data.suggestions || [];
-
-        if (suggestions.length === 0) {
-          suggestionsDropdown.classList.add('hidden');
-          return;
-        }
-
-        suggestionsDropdown.innerHTML = '';
-        activeSuggestIndex = -1;
-
-        suggestions.forEach((term) => {
-          const item = document.createElement('div');
-          item.className = 'suggestion-item px-3.5 py-2 text-xs text-nord-5 cursor-pointer flex items-center gap-2';
-          item.innerHTML = `<i data-lucide="search" class="w-3.5 h-3.5 text-nord-3"></i><span>${escapeHTML(term)}</span>`;
-          item.addEventListener('click', () => {
-            addSearchTerm(term);
-            searchTermInput.value = '';
-            suggestionsDropdown.classList.add('hidden');
-          });
-          suggestionsDropdown.appendChild(item);
-        });
-
-        if (window.lucide) lucide.createIcons();
-        suggestionsDropdown.classList.remove('hidden');
-      } catch (err) {
-        suggestionsDropdown.classList.add('hidden');
-      }
-    }, 180);
-  });
-
-  // Keyboard navigation for suggestions
-  searchTermInput.addEventListener('keydown', (e) => {
-    const items = suggestionsDropdown.querySelectorAll('.suggestion-item');
-    if (suggestionsDropdown.classList.contains('hidden') || items.length === 0) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      activeSuggestIndex = (activeSuggestIndex + 1) % items.length;
-      updateSuggestionHighlight(items);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      activeSuggestIndex = (activeSuggestIndex - 1 + items.length) % items.length;
-      updateSuggestionHighlight(items);
-    } else if (e.key === 'Enter' && activeSuggestIndex >= 0) {
-      e.preventDefault();
-      items[activeSuggestIndex].click();
-    } else if (e.key === 'Escape') {
-      suggestionsDropdown.classList.add('hidden');
-    }
-  });
-
-  function updateSuggestionHighlight(items) {
-    items.forEach((it, idx) => {
-      if (idx === activeSuggestIndex) {
-        it.classList.add('selected');
+  // 4. Scraping Gateway Settings Management
+  function updateGatewayIndicator() {
+    if (gatewayIndicator) {
+      if (currentGatewayKey || currentGatewayProvider === 'custom') {
+        gatewayIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400';
       } else {
-        it.classList.remove('selected');
+        gatewayIndicator.className = 'w-2 h-2 rounded-full bg-nord-13';
+      }
+    }
+  }
+
+  function openGatewaySettings() {
+    if (gatewayProviderSelect) gatewayProviderSelect.value = currentGatewayProvider;
+    if (gatewayKeyInput) gatewayKeyInput.value = currentGatewayKey;
+    if (customGatewayUrlInput) customGatewayUrlInput.value = currentCustomGatewayUrl;
+    toggleCustomUrlGroup();
+    if (gatewayValidationMessage) gatewayValidationMessage.classList.add('hidden');
+    gatewayModal.classList.remove('hidden');
+    gatewayModal.classList.add('flex');
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function closeGatewaySettings() {
+    gatewayModal.classList.add('hidden');
+    gatewayModal.classList.remove('flex');
+  }
+
+  function toggleCustomUrlGroup() {
+    if (gatewayProviderSelect && customGatewayUrlGroup) {
+      if (gatewayProviderSelect.value === 'custom') {
+        customGatewayUrlGroup.classList.remove('hidden');
+      } else {
+        customGatewayUrlGroup.classList.add('hidden');
+      }
+    }
+  }
+
+  if (gatewayProviderSelect) {
+    gatewayProviderSelect.addEventListener('change', toggleCustomUrlGroup);
+  }
+
+  if (openGatewayBtn) openGatewayBtn.addEventListener('click', openGatewaySettings);
+  if (closeGatewayModal) closeGatewayModal.addEventListener('click', closeGatewaySettings);
+
+  if (gatewayForm) {
+    gatewayForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      currentGatewayProvider = gatewayProviderSelect.value;
+      currentGatewayKey = gatewayKeyInput.value.trim();
+      currentCustomGatewayUrl = customGatewayUrlInput.value.trim();
+
+      localStorage.setItem('scraping_provider', currentGatewayProvider);
+      localStorage.setItem('scraping_api_key', currentGatewayKey);
+      localStorage.setItem('custom_gateway_url', currentCustomGatewayUrl);
+
+      updateGatewayIndicator();
+      closeGatewaySettings();
+    });
+  }
+
+  if (testGatewayBtn) {
+    testGatewayBtn.addEventListener('click', async () => {
+      const provider = gatewayProviderSelect.value;
+      const key = gatewayKeyInput.value.trim();
+      const customUrl = customGatewayUrlInput.value.trim();
+
+      testGatewayBtn.disabled = true;
+      testGatewayBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin text-nord-8"></i><span>Testing...</span>`;
+      if (window.lucide) lucide.createIcons();
+
+      gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-8/10 text-nord-8 border-nord-8/30 block';
+      gatewayValidationMessage.textContent = 'Testing connection to AliExpress through gateway...';
+      gatewayValidationMessage.classList.remove('hidden');
+
+      try {
+        const res = await fetch('/api/validate-gateway', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: provider,
+            api_key: key,
+            custom_gateway_url: customUrl
+          })
+        });
+        const data = await res.json();
+
+        if (data.valid) {
+          gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-14/15 text-nord-14 border-nord-14/30 block';
+          gatewayValidationMessage.innerHTML = `<strong>✅ Success!</strong> ${escapeHTML(data.message)}`;
+        } else {
+          gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
+          gatewayValidationMessage.innerHTML = `<strong>❌ Connection Failed:</strong> ${escapeHTML(data.message)}`;
+        }
+      } catch (err) {
+        gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
+        gatewayValidationMessage.textContent = 'Error connecting to validation server: ' + err.message;
+      } finally {
+        testGatewayBtn.disabled = false;
+        testGatewayBtn.innerHTML = `<i data-lucide="activity" class="w-4 h-4 text-nord-8"></i><span>Test Connection</span>`;
+        if (window.lucide) lucide.createIcons();
       }
     });
   }
 
-  document.addEventListener('click', (e) => {
-    if (!searchTermInput.contains(e.target) && !suggestionsDropdown.contains(e.target)) {
-      suggestionsDropdown.classList.add('hidden');
-    }
-  });
+  updateGatewayIndicator();
 
-  // 7. Mandatory Entrance Gate & Gemini API Key
-  async function fetchAvailableModels(apiKey) {
-    try {
-      const res = await fetch('/api/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: apiKey })
-      });
-      const data = await res.json();
-      if (data.models && data.models.length > 0) {
-        modelSelect.innerHTML = '';
-        data.models.forEach((m, idx) => {
-          const opt = document.createElement('option');
-          opt.value = m;
-          opt.textContent = idx === 0 ? `${m} (Recommended)` : m;
-          if (idx === 0) opt.selected = true;
-          modelSelect.appendChild(opt);
-        });
-      }
-    } catch (e) {
-      console.warn('Error fetching dynamic models:', e);
+  // 5. Gemini API Key & Model Validation
+  function updateApiKeyStatus(hasKey) {
+    if (hasKey) {
+      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      apiKeyBtnText.textContent = 'Gemini Key Active';
+      closeApiKeyModal.classList.remove('hidden');
+      cancelApiKeyBtn.classList.remove('hidden');
+    } else {
+      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-amber-400';
+      apiKeyBtnText.textContent = 'Set Gemini Key';
+      closeApiKeyModal.classList.add('hidden');
+      cancelApiKeyBtn.classList.add('hidden');
     }
   }
 
   function checkApiKeyEntranceGate() {
     if (!currentApiKey) {
-      closeApiKeyModal.classList.add('hidden');
-      cancelApiKeyBtn.classList.add('hidden');
+      geminiKeyInput.value = '';
+      keyValidationMessage.classList.add('hidden');
       apiKeyModal.classList.remove('hidden');
       apiKeyModal.classList.add('flex');
-      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-11 animate-pulse';
-      apiKeyBtnText.textContent = 'API Key Required';
+      geminiKeyInput.focus();
     } else {
-      apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-14';
-      apiKeyBtnText.textContent = 'Gemini Connected';
-      geminiKeyInput.value = currentApiKey;
-      fetchAvailableModels(currentApiKey);
+      updateApiKeyStatus(true);
+      fetchModels(currentApiKey);
     }
   }
-  checkApiKeyEntranceGate();
 
   openApiKeyBtn.addEventListener('click', () => {
+    geminiKeyInput.value = currentApiKey;
     keyValidationMessage.classList.add('hidden');
-    closeApiKeyModal.classList.remove('hidden');
-    cancelApiKeyBtn.classList.remove('hidden');
     apiKeyModal.classList.remove('hidden');
     apiKeyModal.classList.add('flex');
     geminiKeyInput.focus();
   });
 
-  function closeKeyModal() {
-    if (!currentApiKey) return;
+  closeApiKeyModal.addEventListener('click', () => {
     apiKeyModal.classList.add('hidden');
     apiKeyModal.classList.remove('flex');
+  });
+
+  cancelApiKeyBtn.addEventListener('click', () => {
+    apiKeyModal.classList.add('hidden');
+    apiKeyModal.classList.remove('flex');
+  });
+
+  async function fetchModels(key) {
+    try {
+      const res = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key })
+      });
+      const data = await res.json();
+      if (data.models && data.models.length > 0) {
+        populateModelDropdown(data.models);
+      }
+    } catch (e) {}
   }
 
-  closeApiKeyModal.addEventListener('click', closeKeyModal);
-  cancelApiKeyBtn.addEventListener('click', closeKeyModal);
+  function populateModelDropdown(models) {
+    const currentVal = modelSelect.value;
+    modelSelect.innerHTML = '';
+    models.forEach((m, idx) => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m + (idx === 0 ? ' (Recommended)' : '');
+      modelSelect.appendChild(opt);
+    });
+
+    if (models.includes(currentVal)) {
+      modelSelect.value = currentVal;
+    } else {
+      modelSelect.value = models[0];
+    }
+  }
 
   apiKeyForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const key = geminiKeyInput.value.trim();
     if (!key) return;
 
-    keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-0 text-nord-4 border-nord-2 block';
-    keyValidationMessage.textContent = 'Diagnosing and validating key with Google Gemini API...';
+    keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-8/10 text-nord-8 border-nord-8/30 block';
+    keyValidationMessage.textContent = 'Verifying API key & testing generation quota...';
+    keyValidationMessage.classList.remove('hidden');
 
     try {
       const res = await fetch('/api/validate-key', {
@@ -468,57 +370,119 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.valid && data.quota_available) {
         currentApiKey = key;
         localStorage.setItem('gemini_api_key', key);
-        apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-nord-14';
-        apiKeyBtnText.textContent = 'Gemini Connected';
-        
+        updateApiKeyStatus(true);
         if (data.models && data.models.length > 0) {
-          modelSelect.innerHTML = '';
-          data.models.forEach((m, idx) => {
-            const opt = document.createElement('option');
-            opt.value = m;
-            opt.textContent = idx === 0 ? `${m} (Recommended)` : m;
-            if (idx === 0) opt.selected = true;
-            modelSelect.appendChild(opt);
-          });
+          populateModelDropdown(data.models);
         }
-
-        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-14/15 text-nord-14 border-nord-14/30 block';
-        keyValidationMessage.textContent = '✅ ' + (data.message || 'Gemini API key validated and active! App unlocked.');
-        setTimeout(closeKeyModal, 1200);
-      } else if (data.valid && !data.quota_available) {
-        currentApiKey = key;
-        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-13/15 text-nord-13 border-nord-13/30 block leading-relaxed';
-        keyValidationMessage.innerHTML = `
-          <div class="font-bold mb-1 flex items-center gap-1.5 text-nord-13">
-            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-            <span>Key Authenticated, but Quota is Unavailable</span>
-          </div>
-          <p class="opacity-90 mb-1.5">${escapeHTML(data.message)}</p>
-          <div class="text-[11px] bg-nord-0/60 p-2 rounded-lg border theme-border space-y-1">
-            <p>• <strong>Free Tier Quota</strong>: Ensure you generated your key under a standard Google AI Studio project with Gemini API enabled.</p>
-            <p>• <strong>Rate Limit</strong>: If you recently ran multiple requests, wait 60 seconds for the free tier per-minute quota to reset.</p>
-            <p>• Check your quota dashboard at <a href="https://aistudio.google.com/" target="_blank" class="text-nord-8 underline font-semibold">Google AI Studio</a>.</p>
-          </div>
-        `;
-        if (window.lucide) lucide.createIcons();
+        apiKeyModal.classList.add('hidden');
+        apiKeyModal.classList.remove('flex');
       } else {
-        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block leading-relaxed';
-        keyValidationMessage.innerHTML = `
-          <div class="font-bold mb-1 flex items-center gap-1.5 text-nord-11">
-            <i data-lucide="x-circle" class="w-4 h-4"></i>
-            <span>Validation Failed: ${escapeHTML(data.error_type || 'AUTH_ERROR')}</span>
-          </div>
-          <p class="opacity-90">${escapeHTML(data.message || 'Invalid Gemini API key.')}</p>
-        `;
-        if (window.lucide) lucide.createIcons();
+        keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
+        keyValidationMessage.innerHTML = `<strong>Validation Failed:</strong> ${escapeHTML(data.message || 'Invalid Gemini API key.')}`;
       }
     } catch (err) {
       keyValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
-      keyValidationMessage.textContent = '❌ Error connecting to validation server.';
+      keyValidationMessage.textContent = 'Error connecting to validation server.';
     }
   });
 
-  // 8. Filter Buttons
+  // 6. Search Terms Chips
+  function renderSearchChips() {
+    searchChipsContainer.innerHTML = '';
+    if (searchTermsList.length === 0) {
+      searchChipsContainer.innerHTML = '<span id="chips-empty-hint" class="text-xs text-nord-3 italic px-1 py-0.5">No search terms confirmed yet. Type above and press Enter.</span>';
+      return;
+    }
+
+    searchTermsList.forEach((term, index) => {
+      const chip = document.createElement('span');
+      chip.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-nord-8/15 text-nord-8 border border-nord-8/30 text-xs font-semibold';
+      chip.innerHTML = `
+        <span>${escapeHTML(term)}</span>
+        <button type="button" data-index="${index}" class="remove-chip-btn hover:text-nord-11 transition focus:outline-none">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      `;
+      searchChipsContainer.appendChild(chip);
+    });
+
+    searchChipsContainer.querySelectorAll('.remove-chip-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.index, 10);
+        searchTermsList.splice(idx, 1);
+        renderSearchChips();
+      });
+    });
+  }
+
+  function addSearchTerm(term) {
+    const clean = term.trim();
+    if (clean && !searchTermsList.includes(clean)) {
+      searchTermsList.push(clean);
+      renderSearchChips();
+    }
+  }
+
+  searchTermInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (searchTermInput.value.trim()) {
+        addSearchTerm(searchTermInput.value);
+        searchTermInput.value = '';
+        suggestionsDropdown.classList.add('hidden');
+      }
+    }
+  });
+
+  // 7. Dynamic Numbered Conditions
+  function renderConditions() {
+    conditionsContainer.innerHTML = '';
+    conditionsList.forEach((cond, index) => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2 relative';
+      row.innerHTML = `
+        <span class="w-6 h-6 rounded-lg bg-nord-2 text-nord-4 font-mono font-bold text-xs flex items-center justify-center flex-shrink-0">${index + 1}</span>
+        <input type="text" data-index="${index}" value="${escapeHTML(cond)}" placeholder="Condition ${index + 1} (e.g. Under $80 AUD)" class="condition-input flex-1 theme-bg-input border theme-border rounded-xl px-3.5 py-2 text-xs text-nord-5 focus:outline-none focus:border-nord-8">
+        ${conditionsList.length > 1 ? `
+          <button type="button" data-index="${index}" class="remove-condition-btn text-nord-3 hover:text-nord-11 p-1 transition" title="Remove condition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+          </button>
+        ` : ''}
+      `;
+      conditionsContainer.appendChild(row);
+    });
+
+    conditionCountBadge.textContent = `${conditionsList.length} / 10`;
+
+    conditionsContainer.querySelectorAll('.condition-input').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        conditionsList[idx] = e.target.value;
+      });
+    });
+
+    conditionsContainer.querySelectorAll('.remove-condition-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(btn.dataset.index, 10);
+        conditionsList.splice(idx, 1);
+        renderConditions();
+      });
+    });
+  }
+
+  addConditionBtn.addEventListener('click', () => {
+    if (conditionsList.length < 10) {
+      conditionsList.push('');
+      renderConditions();
+      const inputs = conditionsContainer.querySelectorAll('.condition-input');
+      inputs[inputs.length - 1].focus();
+    }
+  });
+
+  renderConditions();
+
+  // 8. Product Rendering & Filter Tabs
   filterTabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       filterTabBtns.forEach(b => b.classList.remove('active'));
@@ -528,7 +492,123 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 9. Search Form Submission
+  function renderProducts() {
+    productsList.innerHTML = '';
+    const filtered = activeProducts.filter(p => {
+      if (activeFilter === 'matches') return p.is_match;
+      if (activeFilter === 'excluded') return !p.is_match;
+      return true;
+    });
+
+    const matchCount = activeProducts.filter(p => p.is_match).length;
+    const excludedCount = activeProducts.length - matchCount;
+
+    countAll.textContent = activeProducts.length;
+    countMatches.textContent = matchCount;
+    countExcluded.textContent = excludedCount;
+    resultsCountLabel.textContent = `${filtered.length} of ${activeProducts.length} items`;
+
+    if (filtered.length === 0) {
+      resultsEmptyState.classList.remove('hidden');
+    } else {
+      resultsEmptyState.classList.add('hidden');
+    }
+
+    filtered.forEach(p => {
+      const card = document.createElement('div');
+      card.className = `theme-bg-card border ${p.is_match ? 'border-nord-14/40 hover:border-nord-14' : 'border-nord-11/30 opacity-75 hover:opacity-100'} rounded-2xl p-4 transition shadow-lg flex flex-col justify-between`;
+
+      const imgPlaceholder = p.image_url ? `
+        <img src="${escapeHTML(p.image_url)}" alt="${escapeHTML(p.title)}" class="w-full h-44 object-cover rounded-xl mb-3 bg-nord-0">
+      ` : `
+        <div class="w-full h-44 rounded-xl mb-3 bg-nord-0 flex items-center justify-center text-nord-3 text-xs">No image preview</div>
+      `;
+
+      card.innerHTML = `
+        <div>
+          ${imgPlaceholder}
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold font-mono text-nord-14">${escapeHTML(p.price || 'N/A')}</span>
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold ${p.is_match ? 'bg-nord-14/20 text-nord-14 border border-nord-14/30' : 'bg-nord-11/20 text-nord-11 border border-nord-11/30'}">
+              ${p.is_match ? 'MATCH' : 'EXCLUDED'}
+            </span>
+          </div>
+          <h4 class="text-xs font-bold text-nord-6 line-clamp-2 mb-2 leading-relaxed" title="${escapeHTML(p.title)}">${escapeHTML(p.title)}</h4>
+          <p class="text-[11px] text-nord-4 opacity-90 line-clamp-2 mb-3 leading-relaxed">${escapeHTML(p.verdict_reason || 'Evaluated by Gemini AI')}</p>
+        </div>
+
+        <div class="flex items-center gap-2 pt-3 border-t theme-border">
+          <button type="button" class="view-detail-btn flex-1 py-1.5 rounded-lg bg-nord-2 hover:bg-nord-3 text-nord-5 text-xs font-semibold transition" data-id="${p.item_id}">
+            View Evaluation
+          </button>
+          <a href="${escapeHTML(p.url)}" target="_blank" class="p-1.5 rounded-lg bg-nord-8/15 text-nord-8 hover:bg-nord-8/25 transition" title="Open on AliExpress">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+          </a>
+        </div>
+      `;
+
+      card.querySelector('.view-detail-btn').addEventListener('click', () => {
+        openProductModal(p);
+      });
+
+      productsList.appendChild(card);
+    });
+  }
+
+  function openProductModal(product) {
+    modalProductTitle.textContent = product.title;
+    modalProductPrice.textContent = product.price || 'N/A';
+    modalProductLink.href = product.url;
+
+    modalVerdictBox.className = `p-3.5 rounded-xl border ${product.is_match ? 'bg-nord-14/10 border-nord-14/30 text-nord-14' : 'bg-nord-11/10 border-nord-11/30 text-nord-11'}`;
+    modalVerdictBox.innerHTML = `
+      <div class="font-bold mb-1 flex items-center gap-1.5">
+        <span>${product.is_match ? '✅ ALL CRITERIA MET' : '❌ CRITERIA FAILED'}</span>
+        ${product.confidence ? `<span class="text-[10px] font-mono opacity-80">(${Math.round(product.confidence * 100)}% confidence)</span>` : ''}
+      </div>
+      <p class="text-xs opacity-95 leading-relaxed">${escapeHTML(product.verdict_reason || '')}</p>
+    `;
+
+    modalCriteriaList.innerHTML = '';
+    if (product.criteria_breakdown && product.criteria_breakdown.length > 0) {
+      product.criteria_breakdown.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'p-2.5 rounded-xl bg-nord-0/50 border theme-border space-y-1';
+        item.innerHTML = `
+          <div class="flex items-center justify-between font-bold text-xs">
+            <span class="text-nord-5">${escapeHTML(c.condition)}</span>
+            <span class="${c.met ? 'text-nord-14' : 'text-nord-11'}">${c.met ? 'PASS' : 'FAIL'}</span>
+          </div>
+          <p class="text-[11px] text-nord-4 opacity-80">${escapeHTML(c.evidence || 'Evaluated from listing')}</p>
+        `;
+        modalCriteriaList.appendChild(item);
+      });
+    } else {
+      modalCriteriaList.innerHTML = '<span class="text-xs text-nord-3 italic">No granular criteria breakdown available.</span>';
+    }
+
+    modalSpecsList.innerHTML = '';
+    if (product.specs && product.specs.length > 0) {
+      product.specs.forEach(s => {
+        const specEl = document.createElement('div');
+        specEl.className = 'p-1.5 bg-nord-1/60 rounded-lg text-[11px] text-nord-4';
+        specEl.textContent = s;
+        modalSpecsList.appendChild(specEl);
+      });
+    } else {
+      modalSpecsList.innerHTML = '<span class="text-xs text-nord-3 italic col-span-2">No structured specs found on page.</span>';
+    }
+
+    productDetailModal.classList.remove('hidden');
+    productDetailModal.classList.add('flex');
+  }
+
+  closeDetailModal.addEventListener('click', () => {
+    productDetailModal.classList.add('hidden');
+    productDetailModal.classList.remove('flex');
+  });
+
+  // 9. Search Submission
   searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!currentApiKey) {
@@ -558,7 +638,7 @@ document.addEventListener('DOMContentLoaded', () => {
     activeProducts = [];
     renderProducts();
     liveStatusCard.classList.remove('hidden');
-    liveStageTitle.textContent = 'Initiating AI Search Pipeline...';
+    liveStageTitle.textContent = 'Starting Scraping Gateway & AI Evaluation Pipeline...';
     liveProgressBadge.textContent = '0%';
     liveProgressBar.style.width = '0%';
     liveStatDiscovered.textContent = '0';
@@ -578,6 +658,9 @@ document.addEventListener('DOMContentLoaded', () => {
           search_terms: searchTermsList,
           conditions: joinedConditions,
           gemini_api_key: currentApiKey,
+          scraping_provider: currentGatewayProvider,
+          scraping_api_key: currentGatewayKey,
+          custom_gateway_url: currentCustomGatewayUrl,
           max_candidates: parseInt(maxCandidatesSelect.value, 10),
           ship_country: shipCountrySelect.value,
           currency: currencySelect.value,
@@ -601,72 +684,73 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 10. SSE Stream Listener
+  // 10. SSE Stream Connection
   function connectSSEStream(searchId) {
-    if (activeEventSource) activeEventSource.close();
+    if (activeEventSource) {
+      activeEventSource.close();
+    }
+
     activeEventSource = new EventSource(`/api/search/stream/${searchId}`);
 
-    activeEventSource.onmessage = (event) => {
+    activeEventSource.onmessage = (e) => {
       try {
-        const payload = JSON.parse(event.data);
-        handleStreamEvent(payload);
+        const payload = JSON.parse(e.data);
+        handleSSEEvent(payload);
       } catch (err) {}
     };
 
-    activeEventSource.onerror = (err) => {
-      console.warn('SSE connection interrupted:', err);
+    activeEventSource.onerror = () => {
+      if (activeEventSource) activeEventSource.close();
+      startSearchBtn.disabled = false;
+      startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
     };
   }
 
-  function handleStreamEvent(event) {
-    const { type, stage, progress_pct, data } = event;
-
-    if (stage) liveStageTitle.textContent = stage;
-    if (progress_pct !== undefined) {
-      liveProgressBadge.textContent = `${progress_pct}%`;
-      liveProgressBar.style.width = `${progress_pct}%`;
+  function handleSSEEvent(event) {
+    if (event.stage) liveStageTitle.textContent = event.stage;
+    if (typeof event.progress_pct === 'number') {
+      liveProgressBadge.textContent = `${event.progress_pct}%`;
+      liveProgressBar.style.width = `${event.progress_pct}%`;
     }
 
-    switch (type) {
+    switch (event.type) {
       case 'candidate_discovered':
-        liveStatDiscovered.textContent = data.total_candidates || activeProducts.length;
+        const discovered = parseInt(liveStatDiscovered.textContent, 10) || 0;
+        liveStatDiscovered.textContent = discovered + 1;
         break;
 
       case 'item_evaluated':
-        activeProducts.push(data.item);
-        liveStatEvaluated.textContent = data.index;
-        liveStatMatches.textContent = data.matched_count;
+        const evaluated = parseInt(liveStatEvaluated.textContent, 10) || 0;
+        liveStatEvaluated.textContent = evaluated + 1;
+        const item = event.data || event;
+        const existingIdx = activeProducts.findIndex(p => p.item_id === item.item_id);
+        if (existingIdx !== -1) {
+          activeProducts[existingIdx] = item;
+        } else {
+          activeProducts.push(item);
+        }
+        const matches = activeProducts.filter(p => p.is_match).length;
+        liveStatMatches.textContent = matches;
         renderProducts();
-        break;
-
-      case 'captcha_required':
-        showDirectVerificationModal(data.challenge_url);
-        break;
-
-      case 'captcha_cleared':
-        hideCaptchaModal();
-        break;
-
-      case 'captcha_failed':
-        showCaptchaFailureModal(data.message, data.remaining_terms || []);
         break;
 
       case 'search_completed':
-        if (data.items && data.items.length > 0) {
-          activeProducts = data.items;
-        }
-        renderProducts();
-        liveStageTitle.textContent = `Completed! ${data.total_matched} matching products verified.`;
+        liveStageTitle.textContent = 'Search & AI Evaluation Complete!';
         liveProgressBadge.textContent = '100%';
         liveProgressBar.style.width = '100%';
         startSearchBtn.disabled = false;
         startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
         if (activeEventSource) activeEventSource.close();
-        loadHistoryCount();
         break;
 
-      case 'search_failed':
-        liveStageTitle.textContent = `Error: ${data.error || 'Search encountered an issue.'}`;
+      case 'search_error':
+        liveStageTitle.textContent = `Error: ${event.data?.error || 'Search encountered an error'}`;
+        startSearchBtn.disabled = false;
+        startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        if (activeEventSource) activeEventSource.close();
+        break;
+
+      case 'stream_end':
         startSearchBtn.disabled = false;
         startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
         if (activeEventSource) activeEventSource.close();
@@ -674,518 +758,59 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 11. Render Product Cards
-  function renderProducts() {
-    countAll.textContent = activeProducts.length;
-    const matchesCount = activeProducts.filter(p => p.is_match).length;
-    countMatches.textContent = matchesCount;
-    countExcluded.textContent = activeProducts.length - matchesCount;
-
-    let filtered = activeProducts;
-    if (activeFilter === 'matches') {
-      filtered = activeProducts.filter(p => p.is_match);
-    } else if (activeFilter === 'excluded') {
-      filtered = activeProducts.filter(p => !p.is_match);
-    }
-
-    if (activeProducts.length === 0) {
-      resultsEmptyState.classList.remove('hidden');
-      productsList.classList.add('hidden');
-      resultsCountLabel.textContent = 'No items found yet.';
-      return;
-    }
-
-    resultsEmptyState.classList.add('hidden');
-    productsList.classList.remove('hidden');
-    resultsCountLabel.textContent = `Showing ${filtered.length} of ${activeProducts.length} candidate products (${matchesCount} matching).`;
-
-    productsList.innerHTML = '';
-
-    filtered.forEach((item, index) => {
-      const card = document.createElement('div');
-      card.className = `p-4 rounded-2xl border transition-all ${
-        item.is_match 
-          ? 'bg-nord-14/10 border-nord-14/30 hover:border-nord-14/50' 
-          : 'theme-bg-card theme-border hover:border-nord-3'
-      } flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between`;
-
-      const matchBadge = item.is_match 
-        ? `<span class="badge-match text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"><i data-lucide="check-circle-2" class="w-3 h-3"></i> Verified Match</span>`
-        : `<span class="badge-fail text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1"><i data-lucide="x-circle" class="w-3 h-3"></i> Filtered Out</span>`;
-
-      card.innerHTML = `
-        <div class="flex items-center gap-3.5 flex-1 min-w-0">
-          <div class="w-14 h-14 rounded-xl bg-nord-0/70 border theme-border flex-shrink-0 overflow-hidden flex items-center justify-center">
-            ${item.image_url 
-              ? `<img src="${escapeHTML(item.image_url)}" alt="Product" class="w-full h-full object-cover">` 
-              : `<i data-lucide="package" class="w-6 h-6 text-nord-3"></i>`
-            }
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 mb-1 flex-wrap">
-              ${matchBadge}
-              <span class="text-xs font-mono font-bold text-nord-14">${escapeHTML(item.price || 'N/A')}</span>
-              ${item.original_price ? `<span class="text-[10px] text-nord-3 line-through font-mono">${escapeHTML(item.original_price)}</span>` : ''}
-            </div>
-            <a href="${escapeHTML(item.url)}" target="_blank" class="text-sm font-bold text-nord-6 hover:text-nord-8 transition line-clamp-1 block">
-              ${escapeHTML(item.title)}
-            </a>
-            <p class="text-xs text-nord-4 opacity-80 mt-1 line-clamp-1">
-              ${escapeHTML(item.verdict_reason || 'AI evaluation complete.')}
-            </p>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
-          <button class="view-detail-btn px-3.5 py-2 rounded-xl theme-bg-input hover:border-nord-8 text-nord-5 text-xs font-semibold border theme-border transition flex items-center gap-1.5" data-index="${index}">
-            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-nord-8"></i>
-            <span>AI Breakdown</span>
-          </button>
-          <a href="${escapeHTML(item.url)}" target="_blank" class="p-2 rounded-xl theme-bg-input hover:border-nord-8 text-nord-4 border theme-border transition" title="Open Product Page">
-            <i data-lucide="external-link" class="w-4 h-4"></i>
-          </a>
-        </div>
-      `;
-
-      productsList.appendChild(card);
-    });
-
-    if (window.lucide) lucide.createIcons();
-
-    document.querySelectorAll('.view-detail-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const item = filtered[parseInt(btn.dataset.index, 10)];
-        showProductDetail(item);
-      });
-    });
-  }
-
-  // 12. Show Product Detail Modal
-  function showProductDetail(item) {
-    if (!item) return;
-
-    modalProductTitle.textContent = item.title;
-    modalProductPrice.textContent = item.price || 'N/A';
-    modalProductLink.href = item.url;
-
-    modalVerdictBox.className = `p-3.5 rounded-2xl border ${
-      item.is_match 
-        ? 'bg-nord-14/15 border-nord-14/35 text-nord-14' 
-        : 'bg-nord-11/15 border-nord-11/35 text-nord-11'
-    }`;
-    modalVerdictBox.innerHTML = `
-      <div class="font-bold flex items-center gap-2 mb-1 text-sm">
-        <i data-lucide="${item.is_match ? 'check-circle-2' : 'x-circle'}" class="w-4 h-4"></i>
-        <span>${item.is_match ? 'Product Matches All User Criteria' : 'Product Excluded'}</span>
-      </div>
-      <p class="text-xs opacity-90 leading-relaxed">${escapeHTML(item.verdict_reason || 'No detailed verdict summary.')}</p>
-    `;
-
-    modalCriteriaList.innerHTML = '';
-    const breakdown = item.criteria_breakdown || [];
-    if (breakdown.length === 0) {
-      modalCriteriaList.innerHTML = '<p class="text-nord-3 text-xs">No criteria breakdown items.</p>';
-    } else {
-      breakdown.forEach(crit => {
-        const critDiv = document.createElement('div');
-        critDiv.className = `p-3 rounded-xl border ${
-          crit.met 
-            ? 'bg-nord-14/10 border-nord-14/25 text-nord-5' 
-            : 'bg-nord-11/10 border-nord-11/25 text-nord-4'
-        }`;
-        critDiv.innerHTML = `
-          <div class="flex items-center justify-between font-bold text-xs mb-1">
-            <span class="flex items-center gap-1.5">
-              <i data-lucide="${crit.met ? 'check' : 'x'}" class="w-3.5 h-3.5 ${crit.met ? 'text-nord-14' : 'text-nord-11'}"></i>
-              ${escapeHTML(crit.condition)}
-            </span>
-            <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded ${crit.met ? 'bg-nord-14/20 text-nord-14' : 'bg-nord-11/20 text-nord-11'}">${crit.met ? 'MET' : 'UNMET'}</span>
-          </div>
-          <p class="text-[11px] opacity-80 pl-5 leading-relaxed">${escapeHTML(crit.evidence || 'No specific evidence string.')}</p>
-        `;
-        modalCriteriaList.appendChild(critDiv);
-      });
-    }
-
-    modalSpecsList.innerHTML = '';
-    const specs = item.specs || [];
-    if (specs.length === 0) {
-      modalSpecsList.innerHTML = '<p class="text-nord-3 text-xs col-span-2">No specs parsed.</p>';
-    } else {
-      specs.forEach(s => {
-        const specItem = document.createElement('div');
-        specItem.className = 'text-nord-4 truncate';
-        specItem.textContent = `• ${s}`;
-        specItem.title = s;
-        modalSpecsList.appendChild(specItem);
-      });
-    }
-
-    if (window.lucide) lucide.createIcons();
-
-    productDetailModal.classList.remove('hidden');
-    productDetailModal.classList.add('flex');
-  }
-
-  closeDetailModal.addEventListener('click', () => {
-    productDetailModal.classList.add('hidden');
-    productDetailModal.classList.remove('flex');
-  });
-
-  // 13. Live Interactive Browser Canvas Verification Handlers
-  const captchaCanvas = document.getElementById('captcha-canvas');
-  const canvasLoading = document.getElementById('canvas-loading');
-  const refreshCanvasBtn = document.getElementById('refresh-canvas-btn');
-
-  let canvasStreamInterval = null;
-  let isCanvasDragging = false;
-  let currentClip = { x: 0, y: 0, width: 1000, height: 600 };
-  let isFetchingFrame = false;
-
-  async function fetchLiveFrame() {
-    if (!currentSearchId || isFetchingFrame || !captchaModal || captchaModal.classList.contains('hidden')) return;
-    isFetchingFrame = true;
-
-    try {
-      const timestamp = Date.now();
-      const res = await fetch(`/api/captcha/screenshot/${currentSearchId}?t=${timestamp}`);
-      if (!res.ok) {
-        isFetchingFrame = false;
-        return;
-      }
-
-      const clipX = parseFloat(res.headers.get('x-clip-x') || '0');
-      const clipY = parseFloat(res.headers.get('x-clip-y') || '0');
-      const clipW = parseFloat(res.headers.get('x-clip-width') || '1000');
-      const clipH = parseFloat(res.headers.get('x-clip-height') || '600');
-      currentClip = { x: clipX, y: clipY, width: clipW, height: clipH };
-
-      const blob = await res.blob();
-      const imgUrl = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = () => {
-        if (captchaCanvas && captchaCanvas.getContext) {
-          const ctx = captchaCanvas.getContext('2d');
-          if (captchaCanvas.width !== img.naturalWidth || captchaCanvas.height !== img.naturalHeight) {
-            captchaCanvas.width = img.naturalWidth || 460;
-            captchaCanvas.height = img.naturalHeight || 240;
-          }
-          ctx.drawImage(img, 0, 0);
-          if (canvasLoading) canvasLoading.classList.add('hidden');
-        }
-        URL.revokeObjectURL(imgUrl);
-        isFetchingFrame = false;
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(imgUrl);
-        isFetchingFrame = false;
-      };
-      img.src = imgUrl;
-    } catch (e) {
-      isFetchingFrame = false;
-    }
-  }
-
-  function startCanvasStream() {
-    if (canvasLoading) canvasLoading.classList.remove('hidden');
-    fetchLiveFrame();
-    if (canvasStreamInterval) clearInterval(canvasStreamInterval);
-    canvasStreamInterval = setInterval(fetchLiveFrame, 180);
-  }
-
-  function stopCanvasStream() {
-    if (canvasStreamInterval) {
-      clearInterval(canvasStreamInterval);
-      canvasStreamInterval = null;
-    }
-  }
-
-  function getCanvasPos(e) {
-    if (!captchaCanvas) return { x: 0, y: 0 };
-    const rect = captchaCanvas.getBoundingClientRect();
-    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
-    
-    const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const relY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-    
-    return {
-      x: currentClip.x + (relX * currentClip.width),
-      y: currentClip.y + (relY * currentClip.height)
-    };
-  }
-
-  async function sendMouseEvent(type, x, y) {
-    if (!currentSearchId) return;
-    try {
-      await fetch('/api/captcha/mouse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          search_id: currentSearchId,
-          type: type,
-          x: x,
-          y: y
-        })
-      });
-      setTimeout(fetchLiveFrame, 60);
-    } catch (e) {}
-  }
-
-  if (captchaCanvas) {
-    captchaCanvas.addEventListener('mousedown', (e) => {
-      isCanvasDragging = true;
-      const pos = getCanvasPos(e);
-      sendMouseEvent('down', pos.x, pos.y);
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isCanvasDragging) return;
-      const pos = getCanvasPos(e);
-      sendMouseEvent('move', pos.x, pos.y);
-    });
-
-    window.addEventListener('mouseup', (e) => {
-      if (!isCanvasDragging) return;
-      isCanvasDragging = false;
-      const pos = getCanvasPos(e);
-      sendMouseEvent('up', pos.x, pos.y);
-    });
-
-    captchaCanvas.addEventListener('touchstart', (e) => {
-      isCanvasDragging = true;
-      const pos = getCanvasPos(e);
-      sendMouseEvent('down', pos.x, pos.y);
-    }, { passive: true });
-
-    window.addEventListener('touchmove', (e) => {
-      if (!isCanvasDragging) return;
-      const pos = getCanvasPos(e);
-      sendMouseEvent('move', pos.x, pos.y);
-    }, { passive: true });
-
-    window.addEventListener('touchend', (e) => {
-      if (!isCanvasDragging) return;
-      isCanvasDragging = false;
-      const pos = getCanvasPos(e);
-      sendMouseEvent('up', pos.x, pos.y);
-    });
-  }
-
-  if (refreshCanvasBtn) {
-    refreshCanvasBtn.addEventListener('click', fetchLiveFrame);
-  }
-
-  function showDirectVerificationModal(challengeUrl) {
-    currentChallengeUrl = challengeUrl;
-    captchaSolveView.classList.remove('hidden');
-    captchaFailureView.classList.add('hidden');
-    captchaModal.classList.remove('hidden');
-    captchaModal.classList.add('flex');
-    startCanvasStream();
-  }
-
-  function showCaptchaFailureModal(message, remainingTerms) {
-    stopCanvasStream();
-    captchaSolveView.classList.add('hidden');
-    captchaFailureView.classList.remove('hidden');
-    captchaFailureMessage.textContent = message || 'AliExpress verification challenge failed.';
-
-    remainingTermsList.innerHTML = '';
-    if (!remainingTerms || remainingTerms.length === 0) {
-      remainingTermsList.innerHTML = '<span class="text-xs text-nord-3 italic">No remaining terms left in queue.</span>';
-    } else {
-      remainingTerms.forEach(t => {
-        const chip = document.createElement('span');
-        chip.className = 'px-2.5 py-1 rounded-lg bg-nord-2 text-nord-4 text-xs font-mono font-medium';
-        chip.textContent = t;
-        remainingTermsList.appendChild(chip);
-      });
-    }
-
-    captchaModal.classList.remove('hidden');
-    captchaModal.classList.add('flex');
-    if (window.lucide) lucide.createIcons();
-  }
-
-  function hideCaptchaModal() {
-    stopCanvasStream();
-    captchaModal.classList.add('hidden');
-    captchaModal.classList.remove('flex');
-  }
-
-  cancelCaptchaBtn.addEventListener('click', async () => {
-    if (!currentSearchId) return;
-    try {
-      await fetch('/api/captcha/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ search_id: currentSearchId, action: 'cancel' })
-      });
-    } catch (e) {}
-    hideCaptchaModal();
-  });
-
-  retryCaptchaBtn.addEventListener('click', async () => {
-    if (!currentSearchId) return;
-    try {
-      await fetch('/api/captcha/resume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ search_id: currentSearchId, action: 'retry' })
-      });
-    } catch (e) {}
-    hideCaptchaModal();
-  });
-
-  continueRemainingBtn.addEventListener('click', async () => {
-    if (!currentSearchId) return;
-    try {
-      await fetch('/api/captcha/resume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ search_id: currentSearchId, action: 'continue_remaining' })
-      });
-    } catch (e) {}
-    hideCaptchaModal();
-  });
-
-  // 14. History Management
-  async function loadHistoryCount() {
-    try {
-      const res = await fetch('/api/history');
-      const data = await res.json();
-      historyBadgeCount.textContent = (data.searches || []).length;
-    } catch (e) {}
-  }
-  loadHistoryCount();
-
+  // 11. History Management
   async function loadHistory() {
     try {
       const res = await fetch('/api/history');
       const data = await res.json();
       const searches = data.searches || [];
 
-      historyBadgeCount.textContent = searches.length;
-      historyGrid.innerHTML = '';
+      if (historyBadgeCount) historyBadgeCount.textContent = searches.length;
 
       if (searches.length === 0) {
         historyEmptyState.classList.remove('hidden');
+        historyGrid.innerHTML = '';
         return;
       }
 
       historyEmptyState.classList.add('hidden');
+      historyGrid.innerHTML = '';
 
-      searches.forEach(search => {
+      searches.forEach(s => {
         const card = document.createElement('div');
-        card.className = 'theme-bg-card border theme-border rounded-3xl p-5 shadow-lg flex flex-col justify-between hover:border-nord-8 transition relative';
-
-        const dateStr = new Date(search.timestamp).toLocaleString();
-        
+        card.className = 'theme-bg-card border theme-border rounded-2xl p-5 shadow-lg flex flex-col justify-between hover:border-nord-8 transition';
         card.innerHTML = `
           <div>
             <div class="flex items-center justify-between mb-2">
-              <span class="text-[11px] font-mono text-nord-3">${dateStr}</span>
-              <span class="text-xs font-bold px-2 py-0.5 rounded-full ${
-                search.status === 'completed' 
-                  ? 'bg-nord-14/15 text-nord-14 border border-nord-14/30' 
-                  : 'bg-nord-13/15 text-nord-13 border border-nord-13/30'
-              }">${search.status}</span>
+              <span class="text-xs font-mono text-nord-3">${new Date(s.created_at || Date.now()).toLocaleDateString()}</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-nord-8/20 text-nord-8 font-mono">${s.match_count || 0} Matches</span>
             </div>
-
-            <h3 class="font-extrabold text-nord-6 text-base mb-1.5 line-clamp-1">${escapeHTML(search.search_term)}</h3>
-            
-            <p class="text-xs text-nord-4 opacity-80 font-mono line-clamp-2 bg-nord-0/60 p-2.5 rounded-xl border theme-border mb-4">
-              ${escapeHTML(search.conditions)}
-            </p>
-
-            <div class="flex items-center gap-3 text-xs mb-4">
-              <span class="text-nord-4">Found: <strong class="text-nord-6 font-mono">${search.total_found}</strong></span>
-              <span class="text-nord-4">Matches: <strong class="text-nord-14 font-mono">${search.total_matched}</strong></span>
-              <span class="text-nord-3 font-mono uppercase">${search.currency} (${search.ship_country})</span>
-            </div>
+            <h4 class="font-bold text-sm text-nord-6 mb-1">${escapeHTML(s.search_term)}</h4>
+            <p class="text-xs text-nord-4 opacity-80 line-clamp-2 mb-3">${escapeHTML(s.conditions)}</p>
           </div>
-
-          <div class="flex items-center justify-between pt-3 border-t theme-border gap-2">
-            <button class="delete-history-btn text-xs px-3 py-1.5 rounded-xl text-nord-11 hover:bg-nord-11/10 transition border border-nord-11/25 flex items-center gap-1" data-id="${search.id}">
-              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-              <span>Delete</span>
-            </button>
-            <button class="view-history-btn text-xs px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-nord-10 to-nord-8 text-nord-0 font-bold transition flex items-center gap-1 shadow-md shadow-nord-8/15" data-id="${search.id}">
-              <i data-lucide="eye" class="w-3.5 h-3.5"></i>
-              <span>View Results</span>
-            </button>
+          <div class="flex items-center justify-between pt-3 border-t theme-border">
+            <span class="text-xs font-mono text-nord-4">${s.total_candidates || 0} Evaluated</span>
+            <div class="flex items-center gap-2">
+              <button class="delete-history-btn text-nord-3 hover:text-nord-11 p-1 transition" data-id="${s.search_id}" title="Delete Record">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              </button>
+            </div>
           </div>
         `;
 
+        card.querySelector('.delete-history-btn').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (confirm('Delete this search record?')) {
+            await fetch(`/api/history/${s.search_id}`, { method: 'DELETE' });
+            loadHistory();
+          }
+        });
+
         historyGrid.appendChild(card);
       });
-
-      if (window.lucide) lucide.createIcons();
-
-      document.querySelectorAll('.view-history-btn').forEach(btn => {
-        btn.addEventListener('click', () => viewHistorySearch(btn.dataset.id));
-      });
-
-      document.querySelectorAll('.delete-history-btn').forEach(btn => {
-        btn.addEventListener('click', () => deleteHistorySearch(btn.dataset.id));
-      });
-
-    } catch (err) {
-      console.error('Error loading history:', err);
-    }
+    } catch (e) {}
   }
 
-  refreshHistoryBtn.addEventListener('click', loadHistory);
-
-  async function viewHistorySearch(searchId) {
-    try {
-      const res = await fetch(`/api/history/${searchId}`);
-      const search = await res.json();
-      if (!search) return;
-
-      searchTermsList = (search.search_term || '').split(',').map(t => t.trim()).filter(Boolean);
-      renderSearchChips();
-
-      shipCountrySelect.value = search.ship_country || 'AU';
-      currencySelect.value = search.currency || 'AUD';
-
-      if (search.conditions) {
-        const rawLines = search.conditions.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
-        conditionsList = rawLines.length > 0 ? rawLines : [''];
-        renderConditions();
-      }
-
-      navSearchTab.click();
-      activeProducts = search.items || [];
-      renderProducts();
-      liveStatusCard.classList.remove('hidden');
-      liveStageTitle.textContent = `Viewing Saved Search: "${search.search_term}" (${new Date(search.timestamp).toLocaleString()})`;
-      liveProgressBadge.textContent = '100%';
-      liveProgressBar.style.width = '100%';
-      liveStatDiscovered.textContent = search.total_found;
-      liveStatEvaluated.textContent = activeProducts.length;
-      liveStatMatches.textContent = search.total_matched;
-    } catch (err) {
-      alert('Error fetching search record: ' + err.message);
-    }
-  }
-
-  async function deleteHistorySearch(searchId) {
-    if (!confirm('Are you sure you want to delete this saved search and all its product records from the database?')) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/history/${searchId}`, { method: 'DELETE' });
-      if (res.ok) {
-        loadHistory();
-      } else {
-        alert('Failed to delete record.');
-      }
-    } catch (err) {
-      alert('Error deleting search: ' + err.message);
-    }
-  }
-
+  // Initialize
+  checkApiKeyEntranceGate();
 });

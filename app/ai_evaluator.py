@@ -91,7 +91,15 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
             }
 
     # Order models by priority
-    priority = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-2.5-pro"]
+    priority = [
+        "gemini-3.7-flash",
+        "gemini-3.7-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-3.7-pro",
+        "gemini-2.5-pro"
+    ]
     sorted_models = []
     for p in priority:
         if p in discovered_models:
@@ -100,7 +108,7 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
         if m not in sorted_models:
             sorted_models.append(m)
 
-    test_models = sorted_models if sorted_models else ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash"]
+    test_models = sorted_models if sorted_models else ["gemini-3.7-flash", "gemini-3.7-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
     # Step 2: Test content generation & quota on the best available model
     last_err = ""

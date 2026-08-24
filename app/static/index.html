@@ -74,7 +74,7 @@
         </button>
       </nav>
 
-      <!-- Header Controls: Theme switch & API key -->
+      <!-- Header Controls: Theme switch, Gateway & API key -->
       <div class="flex items-center gap-2 sm:gap-3">
         <!-- Theme Toggle -->
         <button id="theme-toggle-btn" class="p-2 rounded-xl border theme-border theme-bg-input hover:border-nord-8 transition text-nord-4" title="Toggle Theme">
@@ -82,10 +82,16 @@
           <i id="theme-icon-light" data-lucide="sun" class="w-4 h-4"></i>
         </button>
 
+        <!-- Scraping Gateway Status Button -->
+        <button id="open-gateway-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-xl border theme-border theme-bg-input hover:border-nord-8 text-xs font-medium transition-all">
+          <span id="gateway-indicator" class="w-2 h-2 rounded-full bg-nord-13"></span>
+          <span id="gateway-btn-text" class="hidden md:inline">Gateway Settings</span>
+        </button>
+
         <!-- API Key Status Button -->
         <button id="open-api-key-btn" class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border theme-border theme-bg-input hover:border-nord-8 text-xs font-medium transition-all">
           <span id="api-key-indicator" class="w-2 h-2 rounded-full bg-amber-400"></span>
-          <span id="api-key-btn-text" class="hidden sm:inline">Set Gemini API Key</span>
+          <span id="api-key-btn-text" class="hidden sm:inline">Set Gemini Key</span>
         </button>
       </div>
     </div>
@@ -437,79 +443,71 @@
     </div>
   </div>
 
-  <!-- MODAL: LIVE INTERACTIVE BROWSER VERIFICATION MODAL -->
-  <div id="captcha-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+  <!-- MODAL: SCRAPING GATEWAY SETTINGS MODAL -->
+  <div id="gateway-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
       
-      <!-- Live Interactive Browser View -->
-      <div id="captcha-solve-view" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-2xl bg-nord-13/20 text-nord-13 flex items-center justify-center border border-nord-13/30 flex-shrink-0">
-              <i data-lucide="shield-alert" class="w-5 h-5"></i>
-            </div>
-            <div>
-              <h3 class="font-extrabold text-nord-6 text-base">AliExpress Verification</h3>
-              <p class="text-xs text-nord-4 opacity-85">Drag the slider button across to verify.</p>
-            </div>
-          </div>
-
-          <button id="refresh-canvas-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl theme-bg-input border theme-border hover:border-nord-8 text-xs text-nord-4 transition" title="Refresh Live View">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-            <span>Refresh</span>
-          </button>
-        </div>
-
-        <!-- Live Interactive Canvas Stream -->
-        <div class="relative w-full max-w-[360px] mx-auto h-[105px] bg-nord-0 rounded-2xl overflow-hidden border-2 border-nord-8/40 flex items-center justify-center select-none shadow-2xl p-1">
-          <canvas id="captcha-canvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing bg-white rounded-xl"></canvas>
-          <div id="canvas-loading" class="absolute inset-0 bg-nord-0/95 backdrop-blur-xs flex flex-col items-center justify-center text-xs text-nord-4 gap-2">
-            <i data-lucide="loader-2" class="w-5 h-5 animate-spin text-nord-8"></i>
-            <span class="font-medium text-[11px]">Connecting to live slider view...</span>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between text-xs text-nord-4 pt-1">
-          <span class="flex items-center gap-1.5 text-[11px] text-nord-8 font-medium">
-            <i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5"></i>
-            Slide bar to the right edge.
-          </span>
-          <button type="button" id="cancel-captcha-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition">
-            Cancel
-          </button>
-        </div>
-      </div>
-
-      <!-- Verification Failure / Remaining Terms Recovery View -->
-      <div id="captcha-failure-view" class="hidden space-y-4">
-        <div class="flex items-center gap-3 pb-3 border-b theme-border">
-          <div class="w-10 h-10 rounded-2xl bg-nord-11/20 text-nord-11 flex items-center justify-center border border-nord-11/30">
-            <i data-lucide="alert-octagon" class="w-5 h-5"></i>
+      <div class="flex items-center justify-between pb-4 border-b theme-border mb-4">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-nord-8/20 text-nord-8 flex items-center justify-center border border-nord-8/30 flex-shrink-0">
+            <i data-lucide="shield-check" class="w-5 h-5"></i>
           </div>
           <div>
-            <h3 class="font-extrabold text-nord-6 text-base">AliExpress Verification Failed</h3>
-            <p id="captcha-failure-message" class="text-xs text-nord-11">The verification challenge was not cleared.</p>
+            <h3 class="font-extrabold text-nord-6 text-base">Anti-Bot Scraping Gateway</h3>
+            <p class="text-xs text-nord-4 opacity-80">Bypass AliExpress verification automatically</p>
           </div>
         </div>
-
-        <div class="bg-nord-0/60 p-4 rounded-2xl border theme-border text-xs space-y-2">
-          <h4 class="font-bold text-nord-4 uppercase tracking-wider">Remaining Search Terms:</h4>
-          <div id="remaining-terms-list" class="flex flex-wrap gap-1.5"></div>
-          <p class="text-[11px] text-nord-3 pt-1">You can retry the verification challenge or skip this query and continue searching with the remaining terms.</p>
-        </div>
-
-        <div class="flex items-center justify-end gap-3 pt-2">
-          <button id="continue-remaining-btn" class="px-4 py-2.5 rounded-xl text-xs font-semibold text-nord-5 bg-nord-2 hover:bg-nord-3 transition flex items-center gap-1.5">
-            <i data-lucide="skip-forward" class="w-4 h-4 text-nord-8"></i>
-            <span>Continue with Remaining Terms</span>
-          </button>
-          <button id="retry-captcha-btn" class="px-4 py-2.5 rounded-xl text-xs font-bold text-nord-0 bg-nord-8 hover:bg-nord-7 transition flex items-center gap-1.5">
-            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-            <span>Retry Verification</span>
-          </button>
-        </div>
+        <button id="close-gateway-modal" class="text-nord-4 hover:text-nord-6 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
       </div>
 
+      <!-- Quick Guidance -->
+      <div class="bg-nord-0/60 p-4 rounded-2xl border theme-border text-xs space-y-2 mb-4 leading-relaxed">
+        <h4 class="font-bold text-nord-5 flex items-center gap-1.5">
+          <i data-lucide="sparkles" class="w-4 h-4 text-nord-8"></i>
+          Free Gateway API Keys:
+        </h4>
+        <ul class="space-y-1.5 text-nord-4">
+          <li>• <a href="https://www.zenrows.com/" target="_blank" class="text-nord-8 font-bold underline hover:text-nord-7">ZenRows.com</a>: 1,000 free requests (Recommended, zero setup).</li>
+          <li>• <a href="https://scrapfly.io/" target="_blank" class="text-nord-8 font-bold underline hover:text-nord-7">ScrapFly.io</a>: 1,000 free credits with Anti-Scraping Protection.</li>
+          <li>• <a href="https://www.scraperapi.com/" target="_blank" class="text-nord-8 font-bold underline hover:text-nord-7">ScraperAPI.com</a>: 5,000 free API requests.</li>
+        </ul>
+      </div>
+
+      <form id="gateway-form" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Scraping Provider</label>
+          <select id="gateway-provider-select" class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-5 font-semibold focus:outline-none focus:border-nord-8">
+            <option value="zenrows" selected>ZenRows (Recommended)</option>
+            <option value="scrapfly">ScrapFly</option>
+            <option value="scraperapi">ScraperAPI</option>
+            <option value="custom">Custom Proxy / Gateway URL</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Gateway API Key</label>
+          <input type="password" id="gateway-key-input" placeholder="Paste your ZenRows / ScrapFly / ScraperAPI key..." class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
+        </div>
+
+        <div id="custom-gateway-url-group" class="hidden">
+          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Custom Gateway URL</label>
+          <input type="text" id="custom-gateway-url-input" placeholder="https://your-proxy-endpoint.com/api?url={url}" class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
+        </div>
+
+        <div id="gateway-validation-message" class="text-xs hidden p-3 rounded-xl border"></div>
+
+        <div class="flex items-center justify-between gap-3 pt-2">
+          <button type="button" id="test-gateway-btn" class="px-4 py-2.5 rounded-xl text-xs font-semibold text-nord-5 bg-nord-2 hover:bg-nord-3 transition flex items-center gap-1.5">
+            <i data-lucide="activity" class="w-4 h-4 text-nord-8"></i>
+            <span>Test Connection</span>
+          </button>
+          <button type="submit" id="save-gateway-btn" class="px-5 py-2.5 rounded-xl text-xs font-bold text-nord-0 bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 transition shadow-lg shadow-nord-8/20">
+            Save Gateway Settings
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 
