@@ -439,7 +439,7 @@
 
   <!-- MODAL: LIVE INTERACTIVE BROWSER VERIFICATION MODAL -->
   <div id="captcha-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-3xl w-full p-6 sm:p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
       
       <!-- Live Interactive Browser View -->
       <div id="captcha-solve-view" class="space-y-4">
@@ -449,33 +449,33 @@
               <i data-lucide="shield-alert" class="w-5 h-5"></i>
             </div>
             <div>
-              <h3 class="font-extrabold text-nord-6 text-base">AliExpress Slide Verification</h3>
-              <p class="text-xs text-nord-4 opacity-85">Drag the slider directly below to solve inside the browser.</p>
+              <h3 class="font-extrabold text-nord-6 text-base">AliExpress Verification</h3>
+              <p class="text-xs text-nord-4 opacity-85">Drag the slider button across to verify.</p>
             </div>
           </div>
 
           <button id="refresh-canvas-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl theme-bg-input border theme-border hover:border-nord-8 text-xs text-nord-4 transition" title="Refresh Live View">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-            <span class="hidden sm:inline">Refresh</span>
+            <span>Refresh</span>
           </button>
         </div>
 
         <!-- Live Interactive Canvas Stream -->
-        <div class="relative w-full max-w-xl mx-auto aspect-[16/9] bg-nord-0/90 rounded-2xl overflow-hidden border border-nord-8/30 flex items-center justify-center select-none shadow-2xl">
-          <canvas id="captcha-canvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing bg-white"></canvas>
-          <div id="canvas-loading" class="absolute inset-0 bg-nord-0/90 backdrop-blur-xs flex flex-col items-center justify-center text-xs text-nord-4 gap-2">
-            <i data-lucide="loader-2" class="w-6 h-6 animate-spin text-nord-8"></i>
-            <span class="font-medium">Connecting to live slider view...</span>
+        <div class="relative w-full max-w-[360px] mx-auto h-[105px] bg-nord-0 rounded-2xl overflow-hidden border-2 border-nord-8/40 flex items-center justify-center select-none shadow-2xl p-1">
+          <canvas id="captcha-canvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing bg-white rounded-xl"></canvas>
+          <div id="canvas-loading" class="absolute inset-0 bg-nord-0/95 backdrop-blur-xs flex flex-col items-center justify-center text-xs text-nord-4 gap-2">
+            <i data-lucide="loader-2" class="w-5 h-5 animate-spin text-nord-8"></i>
+            <span class="font-medium text-[11px]">Connecting to live slider view...</span>
           </div>
         </div>
 
         <div class="flex items-center justify-between text-xs text-nord-4 pt-1">
-          <span class="flex items-center gap-1.5 text-[11px] opacity-80">
-            <i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5 text-nord-8"></i>
-            Drag the slider bar smoothly to the right edge.
+          <span class="flex items-center gap-1.5 text-[11px] text-nord-8 font-medium">
+            <i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5"></i>
+            Slide bar to the right edge.
           </span>
-          <button type="button" id="cancel-captcha-btn" class="px-4 py-2 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition">
-            Cancel Search
+          <button type="button" id="cancel-captcha-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-0/50 hover:bg-nord-0 border theme-border transition">
+            Cancel
           </button>
         </div>
       </div>

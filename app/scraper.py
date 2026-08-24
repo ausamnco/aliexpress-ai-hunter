@@ -64,21 +64,27 @@ async def get_page_screenshot(search_id: str) -> Optional[Dict[str, Any]]:
         return None
     page = session.active_page
     try:
-        # Find slider button or track to center and zoom on the challenge card
-        btn = page.locator("#nc_1_n1z, .btn_slide, span[id*='nc_1_n1z'], .nc-lang-cnt, #nc_1__scale_text").first
+        # Wait up to 3.5s for the slider button to be attached and visible
+        btn = page.locator("#nc_1_n1z, .btn_slide, span.btn_slide, div.btn_slide").first
+        try:
+            await page.wait_for_selector("#nc_1_n1z, .btn_slide, span.btn_slide", timeout=3500)
+        except Exception:
+            pass
+
         if await btn.count() > 0:
             box = await btn.bounding_box()
-            if box:
-                card_x = max(0, box['x'] - 60)
-                card_y = max(0, box['y'] - 120)
-                card_w = min(1000 - card_x, 460)
-                card_h = min(600 - card_y, 240)
-                clip = {'x': card_x, 'y': card_y, 'width': card_w, 'height': card_h}
-                shot = await page.screenshot(clip=clip, type="jpeg", quality=85)
+            if box and box.get("width", 0) > 10 and box.get("height", 0) > 10:
+                clip = {
+                    "x": max(0, box["x"] - 20),
+                    "y": max(0, box["y"] - 30),
+                    "width": 350,
+                    "height": 95
+                }
+                shot = await page.screenshot(clip=clip, type="jpeg", quality=90)
                 return {"image": shot, "clip": clip}
 
         shot = await page.screenshot(type="jpeg", quality=75)
-        return {"image": shot, "clip": {'x': 0, 'y': 0, 'width': 1000, 'height': 600}}
+        return {"image": shot, "clip": {"x": 0, "y": 0, "width": 1366, "height": 768}}
     except Exception as e:
         logger.warning(f"Error capturing page screenshot: {e}")
         return None
