@@ -49,17 +49,17 @@ class GatewayScraperClient:
         encoded_target = urllib.parse.quote(target_url, safe="")
         country = (ship_country or "AU").lower()
 
-        if provider == "zenrows":
+        if provider == "zenrows" and clean_key:
             return (
                 f"https://api.zenrows.com/v1/?apikey={clean_key}&url={encoded_target}"
                 f"&js_render=true&antibot=true&premium_proxy=true&proxy_country={country}&wait=2000"
             )
-        elif provider == "scrapfly":
+        elif provider == "scrapfly" and clean_key:
             return (
                 f"https://api.scrapfly.io/scrape?key={clean_key}&url={encoded_target}"
                 f"&render_js=true&asp=true&country={country}&wait_for_selector=body"
             )
-        elif provider == "scraperapi":
+        elif provider == "scraperapi" and clean_key:
             return (
                 f"https://api.scraperapi.com/?api_key={clean_key}&url={encoded_target}"
                 f"&render=true&country_code={country}&premium=true"
@@ -143,69 +143,122 @@ class GatewayScraperClient:
                 "message": f"Gateway check failed (Status {status}): {snippet}"
             }
 
+def recursive_find_products(obj: Any, items: Dict[str, Dict[str, Any]]):
+    """
+    Recursively scans any arbitrary JSON data structure to extract AliExpress products.
+    """
+    if isinstance(obj, dict):
+        pid = obj.get("productId") or obj.get("itemId") or obj.get("id") or obj.get("product_id")
+        if pid:
+            pid_str = str(pid)
+            if re.match(r'^\d{8,25}$', pid_str) and pid_str not in items:
+                # Title
+                title = ""
+                raw_title = obj.get("title") or obj.get("displayTitle") or obj.get("productTitle") or obj.get("subject") or obj.get("name")
+                if isinstance(raw_title, dict):
+                    title = raw_title.get("displayTitle") or raw_title.get("title") or ""
+                elif isinstance(raw_title, str):
+                    title = raw_title
+
+                # Price
+                price = "N/A"
+                raw_price = obj.get("prices") or obj.get("price") or obj.get("salePrice") or obj.get("formattedPrice")
+                if isinstance(raw_price, dict):
+                    sale = raw_price.get("salePrice") or raw_price.get("currentPrice") or raw_price.get("minPrice") or raw_price
+                    if isinstance(sale, dict):
+                        price = sale.get("formattedPrice") or sale.get("minPrice") or "N/A"
+                    elif isinstance(sale, (str, int, float)):
+                        price = str(sale)
+                elif isinstance(raw_price, (str, int, float)):
+                    price = str(raw_price)
+
+                # Image
+                image_url = ""
+                raw_img = obj.get("image") or obj.get("imageUrl") or obj.get("imgUrl") or obj.get("picPath") or obj.get("itemImg")
+                if isinstance(raw_img, dict):
+                    image_url = raw_img.get("imgUrl") or raw_img.get("imageUrl") or ""
+                elif isinstance(raw_img, str):
+                    image_url = raw_img
+                if image_url.startswith("//"):
+                    image_url = f"https:{image_url}"
+
+                if len(title) > 3 or price != "N/A":
+                    items[pid_str] = {
+                        "item_id": pid_str,
+                        "title": title or f"AliExpress Product #{pid_str}",
+                        "price": str(price),
+                        "original_price": None,
+                        "url": f"https://www.aliexpress.com/item/{pid_str}.html",
+                        "image_url": image_url or None,
+                        "specs": []
+                    }
+
+        for v in obj.values():
+            recursive_find_products(v, items)
+
+    elif isinstance(obj, list):
+        for elem in obj:
+            recursive_find_products(elem, items)
+
 def parse_search_results(html_text: str) -> List[Dict[str, Any]]:
     """
     Extracts product candidates from search HTML, embedded runParams, or JSON scripts.
     """
     items: Dict[str, Dict[str, Any]] = {}
 
-    # 1. Search for embedded window._init_data_ or window.runParams
-    json_matches = re.findall(r'window\.runParams\s*=\s*(\{.*?\});', html_text, re.DOTALL)
-    if not json_matches:
-        json_matches = re.findall(r'window\._init_data_\s*=\s*(\{.*?\});', html_text, re.DOTALL)
+    # 1. Parse JSON from scripts
+    script_patterns = [
+        r'window\.runParams\s*=\s*(\{.*?\});\s*(?:</script>|\n)',
+        r'window\._init_data_\s*=\s*(\{.*?\});\s*(?:</script>|\n)',
+        r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});\s*(?:</script>|\n)',
+        r'<script[^>]*id=[\"\']__AER_DATA__[\"\'][^>]*>(.*?)</script>',
+        r'<script[^>]*type=[\"\']application/json[\"\'][^>]*>(.*?)</script>',
+        r'runParams\s*:\s*(\{.*?\})\s*,\s*\w+\s*:'
+    ]
 
-    for jm in json_matches:
-        try:
-            data = json.loads(jm)
-            # Traverse common AliExpress JSON response structures
-            root = data.get("data", {}).get("root", {}) or data.get("mods", {})
-            item_list = (
-                root.get("itemList", {}).get("content", []) or
-                data.get("items", []) or
-                []
-            )
-            for raw_item in item_list:
-                item_id = str(raw_item.get("productId") or raw_item.get("itemId") or "")
-                if not item_id or item_id in items:
-                    continue
+    for pat in script_patterns:
+        matches = re.findall(pat, html_text, re.DOTALL)
+        for m in matches:
+            try:
+                data = json.loads(m)
+                recursive_find_products(data, items)
+            except Exception:
+                try:
+                    trimmed = m.strip()
+                    if trimmed.endswith(';'):
+                        trimmed = trimmed[:-1]
+                    data = json.loads(trimmed)
+                    recursive_find_products(data, items)
+                except Exception:
+                    pass
 
-                title = raw_item.get("title", {}).get("displayTitle") or raw_item.get("title") or ""
-                price = raw_item.get("prices", {}).get("salePrice", {}).get("formattedPrice") or raw_item.get("price") or "N/A"
-                orig_price = raw_item.get("prices", {}).get("originalPrice", {}).get("formattedPrice")
-                img = raw_item.get("image", {}).get("imgUrl") or raw_item.get("imageUrl") or ""
-                if img.startswith("//"):
-                    img = f"https:{img}"
+    # 2. Extract item links from HTML regex
+    link_matches = re.findall(r'(?:href=[\"\'])?(?:https?:)?(?://(?:www\.)?aliexpress\.com)?/item/(\d{8,25})\.html', html_text)
+    for pid in link_matches:
+        if pid not in items:
+            items[pid] = {
+                "item_id": pid,
+                "title": f"AliExpress Product #{pid}",
+                "price": "N/A",
+                "original_price": None,
+                "url": f"https://www.aliexpress.com/item/{pid}.html",
+                "image_url": None,
+                "specs": []
+            }
 
-                if len(title) > 3:
-                    items[item_id] = {
-                        "item_id": item_id,
-                        "title": title,
-                        "price": price,
-                        "original_price": orig_price,
-                        "url": f"https://www.aliexpress.com/item/{item_id}.html",
-                        "image_url": img,
-                        "specs": []
-                    }
-        except Exception:
-            pass
-
-    # 2. HTML Anchor/DOM Fallback Extraction
-    if len(items) < 5:
-        # Find item links with regex
-        link_matches = re.findall(r'href=[\"\']([^\"\']*aliexpress\.com/item/(\d+)\.html[^\"\']*)[\"\']', html_text)
-        for full_url, item_id in link_matches:
-            if item_id not in items:
-                # Find title nearby if possible
-                clean_url = f"https://www.aliexpress.com/item/{item_id}.html"
-                items[item_id] = {
-                    "item_id": item_id,
-                    "title": f"AliExpress Product #{item_id}",
-                    "price": "N/A",
-                    "original_price": None,
-                    "url": clean_url,
-                    "image_url": None,
-                    "specs": []
-                }
+    # 3. Extract productId pattern matches directly
+    pid_matches = re.findall(r'\"productId\"\s*:\s*[\"\']?(\d{8,25})[\"\']?', html_text)
+    for pid in pid_matches:
+        if pid not in items:
+            items[pid] = {
+                "item_id": pid,
+                "title": f"AliExpress Product #{pid}",
+                "price": "N/A",
+                "original_price": None,
+                "url": f"https://www.aliexpress.com/item/{pid}.html",
+                "image_url": None,
+                "specs": []
+            }
 
     return list(items.values())
 
@@ -217,45 +270,49 @@ def parse_item_detail(html_text: str, item_id: str) -> Dict[str, Any]:
     price = "N/A"
     orig_price = None
     image_url = None
-    specs = []
+    specs: List[str] = []
 
     # 1. Parse JSON properties inside HTML
-    data_match = re.search(r'window\.runParams\s*=\s*(\{.*?\});\s*</script>', html_text, re.DOTALL)
-    if data_match:
+    data_matches = re.findall(r'(?:window\.)?(?:runParams|_init_data_)\s*=\s*(\{.*?\});\s*(?:</script>|\n)', html_text, re.DOTALL)
+    for dm in data_matches:
         try:
-            data = json.loads(data_match.group(1))
+            data = json.loads(dm)
             root = data.get("data", {}) or data
 
             # Title
             title_module = root.get("titleModule", {}) or root.get("productInfoComponent", {})
-            extracted_title = title_module.get("subject") or title_module.get("title")
+            extracted_title = title_module.get("subject") or title_module.get("title") or title_module.get("productTitle")
             if extracted_title:
-                title = extracted_title
+                title = str(extracted_title)
 
             # Price
             price_module = root.get("priceModule", {}) or root.get("priceComponent", {})
             extracted_price = (
                 price_module.get("formatedActivityPrice") or
                 price_module.get("formatedPrice") or
-                price_module.get("formattedPrice")
+                price_module.get("formattedPrice") or
+                price_module.get("minPrice")
             )
             if extracted_price:
-                price = extracted_price
+                price = str(extracted_price)
 
             # Specs
-            prop_module = root.get("specsModule", {}) or root.get("productPropComponent", {})
-            props_list = prop_module.get("props", [])
+            prop_module = root.get("specsModule", {}) or root.get("productPropComponent", {}) or root.get("skuModule", {})
+            props_list = prop_module.get("props", []) or prop_module.get("productProperties", []) or []
             for prop in props_list:
-                name = prop.get("attrName")
-                val = prop.get("attrValue")
-                if name and val:
-                    specs.append(f"{name}: {val}")
+                if isinstance(prop, dict):
+                    name = prop.get("attrName") or prop.get("name") or prop.get("propName")
+                    val = prop.get("attrValue") or prop.get("value") or prop.get("propValue")
+                    if name and val:
+                        spec_str = f"{name}: {val}"
+                        if spec_str not in specs:
+                            specs.append(spec_str)
 
             # Images
             image_module = root.get("imageModule", {}) or root.get("imageComponent", {})
-            img_list = image_module.get("imagePathList", [])
-            if img_list:
-                image_url = img_list[0]
+            img_list = image_module.get("imagePathList", []) or image_module.get("images", [])
+            if img_list and isinstance(img_list, list):
+                image_url = str(img_list[0])
                 if image_url.startswith("//"):
                     image_url = f"https:{image_url}"
         except Exception:
@@ -263,16 +320,26 @@ def parse_item_detail(html_text: str, item_id: str) -> Dict[str, Any]:
 
     # 2. HTML Fallback Extraction if JSON parsing was partial
     if not specs:
-        spec_items = re.findall(
-            r'<(?:li|div|span)[^>]*class=[\"\'][^\"\']*(?:specification--item|prop-item|spec--item)[^\"\']*[\"\'][^>]*>(.*?)</(?:li|div|span)>',
-            html_text,
-            re.DOTALL | re.IGNORECASE
-        )
-        for s in spec_items:
-            clean_s = re.sub(r'<[^>]+>', ' ', s).strip()
-            clean_s = re.sub(r'\s+', ' ', clean_s)
-            if len(clean_s) > 3 and clean_s not in specs:
-                specs.append(clean_s)
+        spec_patterns = [
+            r'<(?:li|div|span|td)[^>]*class=[\"\'][^\"\']*(?:specification--item|prop-item|spec--item|property-item|specification-item)[^\"\']*[\"\'][^>]*>(.*?)</(?:li|div|span|td)>',
+            r'<span class=[\"\']title[\"\']>([^<]+)</span>\s*<span class=[\"\']value[\"\']>([^<]+)</span>'
+        ]
+        for pat in spec_patterns:
+            matches = re.findall(pat, html_text, re.DOTALL | re.IGNORECASE)
+            for m in matches:
+                if isinstance(m, tuple):
+                    k, v = m
+                    clean_k = re.sub(r'<[^>]+>', ' ', k).strip()
+                    clean_v = re.sub(r'<[^>]+>', ' ', v).strip()
+                    if clean_k and clean_v:
+                        spec_str = f"{clean_k}: {clean_v}"
+                        if spec_str not in specs:
+                            specs.append(spec_str)
+                elif isinstance(m, str):
+                    clean_s = re.sub(r'<[^>]+>', ' ', m).strip()
+                    clean_s = re.sub(r'\s+', ' ', clean_s)
+                    if len(clean_s) > 3 and clean_s not in specs:
+                        specs.append(clean_s)
 
     if title == f"AliExpress Product #{item_id}":
         title_h1 = re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.DOTALL | re.IGNORECASE)
@@ -285,6 +352,13 @@ def parse_item_detail(html_text: str, item_id: str) -> Dict[str, Any]:
         price_match = re.search(r'([A-Z]{0,3}\s*\$\s*[\d\.,]+)', html_text)
         if price_match:
             price = price_match.group(1)
+
+    if not image_url:
+        img_match = re.search(r'<meta property=[\"\']og:image[\"\'] content=[\"\']([^\"\']+)[\"\']', html_text)
+        if img_match:
+            image_url = img_match.group(1)
+            if image_url.startswith("//"):
+                image_url = f"https:{image_url}"
 
     return {
         "item_id": item_id,
@@ -314,6 +388,15 @@ async def run_scraper_job(
     sessions[search_id] = session
 
     try:
+        # Create search in DB
+        await database.create_search(
+            search_id=search_id,
+            search_term=search_term,
+            conditions=conditions,
+            currency=currency,
+            ship_country=ship_country
+        )
+
         session.status = "running"
         session.stage = "Generating intelligent search variations with Gemini AI..."
         session.progress_pct = 5
@@ -352,94 +435,117 @@ async def run_scraper_job(
             if len(discovered_candidates) >= max_candidates:
                 break
 
-            session.stage = f"Searching AliExpress for '{query}' via {scraping_provider.capitalize()} Gateway..."
+            provider_label = scraping_provider.capitalize() if scraping_api_key or scraping_provider == "custom" else "Direct Web"
+            session.stage = f"Searching AliExpress for '{query}' ({provider_label})..."
             session.progress_pct = 10 + int((q_idx / len(search_queries)) * 30)
             await session.emit_event("query_started", {"query": query, "query_index": q_idx + 1})
 
             slug = re.sub(r'[^a-z0-9]+', '-', query.lower()).strip('-')
-            search_url = f"https://www.aliexpress.com/w/wholesale-{slug}.html"
+            encoded_query = urllib.parse.quote_plus(query)
 
-            status, html = await GatewayScraperClient.fetch_page(
-                target_url=search_url,
-                provider=scraping_provider,
-                api_key=scraping_api_key,
-                ship_country=ship_country,
-                currency=currency,
-                custom_gateway_url=custom_gateway_url
-            )
+            # Try primary search URL format
+            search_urls = [
+                f"https://www.aliexpress.com/w/wholesale-{slug}.html?SearchText={encoded_query}",
+                f"https://www.aliexpress.com/wholesale?SearchText={encoded_query}"
+            ]
 
-            if status == 200:
-                candidates = parse_search_results(html)
-                for cand in candidates:
-                    cid = cand["item_id"]
-                    if cid not in discovered_candidates:
-                        discovered_candidates[cid] = cand
-                        await session.emit_event("candidate_discovered", cand)
-                        if len(discovered_candidates) >= max_candidates:
-                            break
-            else:
-                logger.warning(f"Gateway returned status {status} for query '{query}'")
+            for search_url in search_urls:
+                status, html = await GatewayScraperClient.fetch_page(
+                    target_url=search_url,
+                    provider=scraping_provider,
+                    api_key=scraping_api_key,
+                    ship_country=ship_country,
+                    currency=currency,
+                    custom_gateway_url=custom_gateway_url
+                )
+
+                if status == 200:
+                    candidates = parse_search_results(html)
+                    for cand in candidates:
+                        cid = cand["item_id"]
+                        if cid not in discovered_candidates:
+                            discovered_candidates[cid] = cand
+                            await session.emit_event("candidate_discovered", cand)
+                            if len(discovered_candidates) >= max_candidates:
+                                break
+                    if candidates:
+                        break
+                else:
+                    logger.warning(f"Gateway returned status {status} for query '{query}' at {search_url}")
 
         if not discovered_candidates:
-            session.stage = "No candidates found. Trying broad query fallback..."
-            await session.emit_event("progress_update", {"message": "No candidates found on initial queries. Trying direct fallback..."})
+            msg = (
+                "No products could be extracted. "
+                "Make sure your Scraping Gateway Key (ZenRows / ScrapFly / ScraperAPI) is active to bypass AliExpress security challenges."
+                if not scraping_api_key and scraping_provider != "custom" else
+                "AliExpress search returned 0 items for this query. Try a broader search keyword."
+            )
+            session.stage = msg
+            await session.emit_event("progress_update", {"message": msg})
 
         # 2. Evaluate candidate products with Gemini AI
         candidate_list = list(discovered_candidates.values())[:max_candidates]
-        session.stage = f"Found {len(candidate_list)} candidate products. Evaluating specifications with {model_name}..."
-        session.progress_pct = 45
-        await session.emit_event("evaluation_phase_started", {"total_candidates": len(candidate_list)})
+        if candidate_list:
+            session.stage = f"Found {len(candidate_list)} candidate products. Evaluating specifications with {model_name}..."
+            session.progress_pct = 45
+            await session.emit_event("evaluation_phase_started", {"total_candidates": len(candidate_list)})
 
-        for idx, cand in enumerate(candidate_list):
-            item_id = cand["item_id"]
-            session.stage = f"Evaluating product {idx + 1}/{len(candidate_list)}: '{cand['title'][:45]}...'"
-            session.progress_pct = 45 + int((idx / max(1, len(candidate_list))) * 50)
-            await session.emit_event("item_evaluating", {"item_id": item_id, "title": cand["title"]})
+            for idx, cand in enumerate(candidate_list):
+                item_id = cand["item_id"]
+                session.stage = f"Evaluating product {idx + 1}/{len(candidate_list)}: '{cand['title'][:45]}...'"
+                session.progress_pct = 45 + int((idx / max(1, len(candidate_list))) * 50)
+                await session.emit_event("item_evaluating", {"item_id": item_id, "title": cand["title"]})
 
-            # Fetch deep item details and specifications via Gateway
-            item_url = f"https://www.aliexpress.com/item/{item_id}.html"
-            item_status, item_html = await GatewayScraperClient.fetch_page(
-                target_url=item_url,
-                provider=scraping_provider,
-                api_key=scraping_api_key,
-                ship_country=ship_country,
-                currency=currency,
-                custom_gateway_url=custom_gateway_url
-            )
+                # Fetch deep item details and specifications via Gateway
+                item_url = f"https://www.aliexpress.com/item/{item_id}.html"
+                item_status, item_html = await GatewayScraperClient.fetch_page(
+                    target_url=item_url,
+                    provider=scraping_provider,
+                    api_key=scraping_api_key,
+                    ship_country=ship_country,
+                    currency=currency,
+                    custom_gateway_url=custom_gateway_url
+                )
 
-            if item_status == 200:
-                detailed_cand = parse_item_detail(item_html, item_id)
-                # Keep original price/image if detailed page was missing them
-                if cand.get("price") != "N/A" and detailed_cand.get("price") == "N/A":
-                    detailed_cand["price"] = cand["price"]
-                if not detailed_cand.get("image_url") and cand.get("image_url"):
-                    detailed_cand["image_url"] = cand["image_url"]
-            else:
-                detailed_cand = cand
+                if item_status == 200:
+                    detailed_cand = parse_item_detail(item_html, item_id)
+                    if cand.get("price") != "N/A" and detailed_cand.get("price") == "N/A":
+                        detailed_cand["price"] = cand["price"]
+                    if not detailed_cand.get("image_url") and cand.get("image_url"):
+                        detailed_cand["image_url"] = cand["image_url"]
+                else:
+                    detailed_cand = cand
 
-            # Evaluate against user conditions using Gemini
-            evaluation: ProductEvaluation = await ai_evaluator.evaluate_product(
-                item=detailed_cand,
-                conditions=conditions,
-                api_key=gemini_api_key,
-                model_name=model_name
-            )
+                # Evaluate against user conditions using Gemini
+                evaluation: ProductEvaluation = await ai_evaluator.evaluate_product(
+                    item=detailed_cand,
+                    conditions=conditions,
+                    api_key=gemini_api_key,
+                    model_name=model_name
+                )
 
-            detailed_cand["is_match"] = evaluation.is_match
-            detailed_cand["confidence"] = evaluation.confidence
-            detailed_cand["verdict_reason"] = evaluation.verdict_reason
-            detailed_cand["criteria_breakdown"] = [c.model_dump() for c in evaluation.criteria_evaluations]
+                detailed_cand["is_match"] = evaluation.is_match
+                detailed_cand["confidence"] = evaluation.confidence
+                detailed_cand["verdict_reason"] = evaluation.verdict_reason
+                detailed_cand["criteria_breakdown"] = [c.model_dump() for c in evaluation.criteria_evaluations]
 
-            # Save in database
-            await database.save_search_result(search_id, detailed_cand)
-            session.evaluated_items.append(detailed_cand)
+                # Save in database
+                await database.save_search_result(search_id, detailed_cand)
+                session.evaluated_items.append(detailed_cand)
 
-            await session.emit_event("item_evaluated", detailed_cand)
+                await session.emit_event("item_evaluated", detailed_cand)
 
         session.status = "completed"
-        session.stage = "Search and AI evaluation completed successfully!"
-        session.progress_pct = 100
         match_count = sum(1 for item in session.evaluated_items if item.get("is_match"))
+        await database.update_search_status(
+            search_id=search_id,
+            status="completed",
+            total_found=len(session.evaluated_items),
+            total_matched=match_count
+        )
+
+        session.stage = f"Search & AI evaluation completed! ({match_count} matches / {len(session.evaluated_items)} evaluated)"
+        session.progress_pct = 100
         await session.emit_event("search_completed", {
             "total_evaluated": len(session.evaluated_items),
             "matches_found": match_count
@@ -454,20 +560,3 @@ async def run_scraper_job(
 
     finally:
         await session.emit_event("stream_end")
-
-async def get_session_events(search_id: str) -> AsyncGenerator[str, None]:
-    session = sessions.get(search_id)
-    if not session:
-        yield f"data: {json.dumps({'type': 'error', 'message': 'Session not found'})}\n\n"
-        return
-
-    while True:
-        try:
-            event = await asyncio.wait_for(session.event_queue.get(), timeout=30.0)
-            yield f"data: {json.dumps(event)}\n\n"
-            if event.get("type") == "stream_end":
-                break
-        except asyncio.TimeoutError:
-            yield f": keepalive\n\n"
-        except asyncio.CancelledError:
-            break

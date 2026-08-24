@@ -91,6 +91,40 @@ async def update_search_status(search_id: str, status: str, total_found: int = 0
         )
         await db.commit()
 
+async def save_search_result(search_id: str, item: Dict[str, Any]):
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    db_file = get_db_path()
+    async with aiosqlite.connect(db_file) as db:
+        db.row_factory = aiosqlite.Row
+        criteria_str = json.dumps(item.get("criteria_breakdown", []), ensure_ascii=False)
+        specs_str = json.dumps(item.get("specs", []), ensure_ascii=False)
+        
+        await db.execute(
+            """
+            INSERT INTO items (
+                search_id, item_id, title, price, original_price, image_url, 
+                url, rating, sales, is_match, verdict_reason, criteria_breakdown, specs, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                search_id,
+                str(item.get("item_id", "")),
+                item.get("title", ""),
+                item.get("price", ""),
+                item.get("original_price"),
+                item.get("image_url"),
+                item.get("url", ""),
+                item.get("rating"),
+                item.get("sales"),
+                1 if item.get("is_match") else 0,
+                item.get("verdict_reason", ""),
+                criteria_str,
+                specs_str,
+                now
+            )
+        )
+        await db.commit()
+
 async def save_items(search_id: str, items: List[Dict[str, Any]]):
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     db_file = get_db_path()
