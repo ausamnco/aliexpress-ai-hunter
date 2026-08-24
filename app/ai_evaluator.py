@@ -93,12 +93,13 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
     # Order models by priority
     priority = [
         "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
         "gemini-3.7-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-3.7-pro",
-        "gemini-2.5-pro"
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest",
+        "gemini-2.5-flash"
     ]
     sorted_models = []
     for p in priority:
@@ -108,56 +109,49 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
         if m not in sorted_models:
             sorted_models.append(m)
 
-    test_models = sorted_models if sorted_models else ["gemini-3.7-flash", "gemini-3.7-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    test_models = sorted_models if sorted_models else ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"]
 
-    # Step 2: Test content generation & quota on the best available model
+    # Step 2: Test content generation & quota on available models
+    verified_models = []
     last_err = ""
-    for test_model in test_models[:3]:
+    for test_model in test_models[:6]:
         try:
             response = client.models.generate_content(
                 model=test_model,
                 contents="Reply with 'OK'"
             )
             if response and response.text:
-                return {
-                    "valid": True,
-                    "quota_available": True,
-                    "error_type": None,
-                    "message": f"Gemini API key is active and verified with {test_model}!",
-                    "models": test_models
-                }
+                verified_models.append(test_model)
         except Exception as e:
             last_err = str(e)
-            err_lower = last_err.lower()
             logger.warning(f"Probe failed for {test_model}: {last_err}")
-            if "resource_exhausted" in err_lower or "429" in err_lower or "quota" in err_lower:
-                return {
-                    "valid": True,
-                    "quota_available": False,
-                    "error_type": "QUOTA_EXHAUSTED",
-                    "message": "API key is valid, but your free-tier generation quota has been exceeded (HTTP 429). Please wait a few moments or check your quota in Google AI Studio.",
-                    "models": test_models
-                }
-            elif "not found" in err_lower or "404" in err_lower:
-                continue # Try next candidate model
+            continue
+
+    if verified_models:
+        return {
+            "valid": True,
+            "quota_available": True,
+            "error_type": None,
+            "message": f"Gemini API key is active and verified with {verified_models[0]}!",
+            "models": verified_models + [m for m in test_models if m not in verified_models]
+        }
 
     # If all generation probes failed
     return {
         "valid": True,
         "quota_available": False,
         "error_type": "GENERATION_PROBE_FAILED",
-        "message": f"API key is valid and authenticated, but model generation failed: {last_err[:120]}",
+        "message": f"API key is authenticated, but generation probes failed: {last_err[:120]}",
         "models": test_models
     }
 
 async def list_available_models(api_key: str) -> List[str]:
     diag = await diagnose_and_validate_key(api_key)
-    return diag.get("models", ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"])
+    return diag.get("models", ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"])
 
-async def generate_search_variations(search_term: str, conditions: str, api_key: str, model_name: str = "gemini-2.5-flash") -> List[str]:
-    try:
-        client = genai.Client(api_key=api_key)
-        prompt = f"""
+async def generate_search_variations(search_term: str, conditions: str, api_key: str, model_name: str = "gemini-3.6-flash") -> List[str]:
+    client = genai.Client(api_key=api_key)
+    prompt = f"""
 Given a user's product search term and criteria, generate 3 to 4 distinct, highly effective AliExpress keyword search phrases (max 4-6 words each) optimized to find relevant listings.
 
 User Product: {search_term}
@@ -165,20 +159,27 @@ User Conditions: {conditions}
 
 Return ONLY a valid JSON array of strings, for example: ["phrase 1", "phrase 2", "phrase 3"]
 """
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.2,
+    fallback_models = [model_name, "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    seen = set()
+    models_to_try = [m for m in fallback_models if m and not (m in seen or seen.add(m))]
+
+    for m in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=m,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2,
+                )
             )
-        )
-        data = json.loads(response.text)
-        if isinstance(data, list) and len(data) > 0:
-            return [str(x).strip() for x in data if str(x).strip()]
-    except Exception as e:
-        logger.warning(f"Error generating search variations with Gemini: {e}")
-    
+            data = json.loads(response.text)
+            if isinstance(data, list) and len(data) > 0:
+                return [str(x).strip() for x in data if str(x).strip()]
+        except Exception as e:
+            logger.warning(f"Variation generation error on {m}: {e}")
+            continue
+
     return [search_term]
 
 async def evaluate_product_criteria(
@@ -188,12 +189,11 @@ async def evaluate_product_criteria(
     body_snippet: str,
     user_conditions: str,
     api_key: str,
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.6-flash"
 ) -> ProductEvaluation:
-    try:
-        client = genai.Client(api_key=api_key)
-        
-        prompt = f"""
+    client = genai.Client(api_key=api_key)
+    
+    prompt = f"""
 You are an expert product evaluation assistant. You must rigorously check if the following AliExpress product strictly meets ALL user-defined conditions.
 
 ### USER-DEFINED CONDITIONS:
@@ -215,34 +215,45 @@ You are an expert product evaluation assistant. You must rigorously check if the
 5. Provide concise factual evidence for each evaluation.
 """
 
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=ProductEvaluation,
-                temperature=0.1,
-            )
-        if response.parsed:
-            return response.parsed
-            
-        data = json.loads(response.text)
-        return ProductEvaluation(**data)
-        
-    except Exception as e:
-        logger.error(f"Gemini evaluation error for '{item_title}': {e}")
-        return ProductEvaluation(
-            is_match=False,
-            confidence=0.5,
-            verdict_reason=f"AI evaluation failed: {str(e)[:100]}",
-            criteria_evaluations=[
-                CriteriaEvaluation(
-                    condition="Automated Verification",
-                    met=False,
-                    evidence="AI evaluation timed out or encountered an API error."
+    fallback_models = [model_name, "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    seen = set()
+    models_to_try = [m for m in fallback_models if m and not (m in seen or seen.add(m))]
+
+    last_error = ""
+    for m in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=m,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ProductEvaluation,
+                    temperature=0.1,
                 )
-            ]
-        )
+            )
+            if response.parsed:
+                return response.parsed
+                
+            data = json.loads(response.text)
+            return ProductEvaluation(**data)
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Evaluation error on {m}: {e}")
+            continue
+
+    logger.error(f"Gemini evaluation failed on all models for '{item_title}': {last_error}")
+    return ProductEvaluation(
+        is_match=False,
+        confidence=0.5,
+        verdict_reason=f"AI evaluation failed: {last_error[:100]}",
+        criteria_evaluations=[
+            CriteriaEvaluation(
+                condition="Automated Verification",
+                met=False,
+                evidence="AI evaluation timed out or encountered an API error."
+            )
+        ]
+    )
 
 async def evaluate_product(
     item: Dict[str, Any],

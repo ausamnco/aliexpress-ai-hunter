@@ -52,12 +52,12 @@ class GatewayScraperClient:
         if provider == "zenrows" and clean_key:
             return (
                 f"https://api.zenrows.com/v1/?apikey={clean_key}&url={encoded_target}"
-                f"&js_render=true&antibot=true&premium_proxy=true&proxy_country={country}&wait=2000"
+                f"&js_render=true&antibot=true&premium_proxy=true&custom_headers=true"
             )
         elif provider == "scrapfly" and clean_key:
             return (
                 f"https://api.scrapfly.io/scrape?key={clean_key}&url={encoded_target}"
-                f"&render_js=true&asp=true&country={country}&wait_for_selector=body"
+                f"&render_js=true&asp=true&country={country}&headers[cookie]=aep_usuc_f%3Dsite%3Dglo%26c_tp%3D{currency}%26region%3D{ship_country}%26b_locale%3Den_US"
             )
         elif provider == "scraperapi" and clean_key:
             return (
@@ -82,7 +82,8 @@ class GatewayScraperClient:
         ship_country: str = "AU",
         currency: str = "AUD",
         custom_gateway_url: Optional[str] = None,
-        timeout: float = 45.0
+        timeout: float = 90.0,
+        max_retries: int = 2
     ) -> Tuple[int, str]:
         gateway_url = cls.build_gateway_url(
             target_url=target_url,
@@ -93,18 +94,31 @@ class GatewayScraperClient:
         )
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
+            "Cookie": f"aep_usuc_f=site=glo&province=&city=&c_tp={currency}&region={ship_country}&b_locale=en_US&ae_u_p_s=2; xman_us_f=x_locale=en_US;",
         }
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        last_err = ""
+        for attempt in range(max_retries + 1):
             try:
-                resp = await client.get(gateway_url, headers=headers)
-                return resp.status_code, resp.text
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                    resp = await client.get(gateway_url, headers=headers)
+                    if resp.status_code == 200:
+                        return resp.status_code, resp.text
+                    elif attempt < max_retries:
+                        await asyncio.sleep(2.0 * (attempt + 1))
+                        continue
+                    return resp.status_code, resp.text
             except Exception as e:
-                logger.warning(f"Gateway fetch error for {target_url}: {e}")
-                return 500, str(e)
+                last_err = str(e)
+                logger.warning(f"Gateway fetch attempt {attempt + 1} error for {target_url}: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+                    continue
+
+        return 500, last_err
 
     @classmethod
     async def validate_gateway(
@@ -113,20 +127,19 @@ class GatewayScraperClient:
         api_key: str,
         custom_gateway_url: Optional[str] = None
     ) -> Dict[str, Any]:
-        clean_key = (api_key or "").strip()
-        if provider != "custom" and not clean_key:
-            return {
-                "valid": False,
-                "message": f"API key for {provider.capitalize()} is required."
-            }
+        if provider not in ["zenrows", "scrapfly", "scraperapi", "custom"]:
+            return {"valid": False, "provider": provider, "message": "Unknown gateway provider."}
 
-        test_target = "https://www.aliexpress.com"
+        if provider != "custom" and not (api_key and api_key.strip()):
+            return {"valid": False, "provider": provider, "message": f"{provider.capitalize()} API key is required."}
+
+        test_url = "https://www.aliexpress.com"
         status, content = await cls.fetch_page(
-            target_url=test_target,
+            target_url=test_url,
             provider=provider,
-            api_key=clean_key,
+            api_key=api_key,
             custom_gateway_url=custom_gateway_url,
-            timeout=25.0
+            timeout=90.0
         )
 
         if status == 200 and len(content) > 1000:
@@ -207,6 +220,15 @@ def parse_search_results(html_text: str) -> List[Dict[str, Any]]:
     items: Dict[str, Dict[str, Any]] = {}
 
     # 1. Parse JSON from scripts
+    # First: Check for window._dida_config_._init_data_ (Modern AliExpress search page standard)
+    dida_matches = re.findall(r'_init_data_\s*=\s*\{\s*data\s*:\s*(\{.*?\})\s*\}\s*(?:;|<|/\*|window)', html_text, re.DOTALL)
+    for dm in dida_matches:
+        try:
+            data = json.loads(dm)
+            recursive_find_products(data, items)
+        except Exception:
+            pass
+
     script_patterns = [
         r'window\.runParams\s*=\s*(\{.*?\});\s*(?:</script>|\n)',
         r'window\._init_data_\s*=\s*(\{.*?\});\s*(?:</script>|\n)',
@@ -272,7 +294,46 @@ def parse_item_detail(html_text: str, item_id: str) -> Dict[str, Any]:
     image_url = None
     specs: List[str] = []
 
-    # 1. Parse JSON properties inside HTML
+    # 1. Parse Schema.org Product JSON-LD (Universally present on all AliExpress product pages)
+    scripts = re.findall(r'<script[^>]*>(.*?)</script>', html_text, re.DOTALL)
+    for s in scripts:
+        if "schema.org" in s and "Product" in s:
+            try:
+                data = json.loads(s.strip())
+                if isinstance(data, list):
+                    for elem in data:
+                        if isinstance(elem, dict) and elem.get("@type") == "Product":
+                            data = elem
+                            break
+
+                if isinstance(data, dict) and data.get("@type") == "Product":
+                    if data.get("name"):
+                        title = str(data.get("name")).split(" - AliExpress")[0].strip()
+                    if data.get("description"):
+                        desc = str(data.get("description")).strip()
+                        if desc and f"Description: {desc}" not in specs:
+                            specs.append(f"Description: {desc}")
+                    if data.get("brand"):
+                        b = data.get("brand")
+                        brand_name = b.get("name") if isinstance(b, dict) else str(b)
+                        if brand_name and f"Brand: {brand_name}" not in specs:
+                            specs.append(f"Brand: {brand_name}")
+                    if data.get("image"):
+                        imgs = data.get("image")
+                        if isinstance(imgs, list) and imgs:
+                            image_url = str(imgs[0])
+                        elif isinstance(imgs, str):
+                            image_url = imgs
+                    if data.get("offers"):
+                        off = data.get("offers")
+                        if isinstance(off, dict) and off.get("price"):
+                            curr = off.get("priceCurrency", "")
+                            p_val = off.get("price", "")
+                            price = f"{curr} {p_val}".strip()
+            except Exception:
+                pass
+
+    # 2. Parse JSON properties inside HTML (runParams / _init_data_)
     data_matches = re.findall(r'(?:window\.)?(?:runParams|_init_data_)\s*=\s*(\{.*?\});\s*(?:</script>|\n)', html_text, re.DOTALL)
     for dm in data_matches:
         try:
@@ -312,14 +373,15 @@ def parse_item_detail(html_text: str, item_id: str) -> Dict[str, Any]:
             image_module = root.get("imageModule", {}) or root.get("imageComponent", {})
             img_list = image_module.get("imagePathList", []) or image_module.get("images", [])
             if img_list and isinstance(img_list, list):
-                image_url = str(img_list[0])
-                if image_url.startswith("//"):
-                    image_url = f"https:{image_url}"
+                img_url = str(img_list[0])
+                if img_url.startswith("//"):
+                    img_url = f"https:{img_url}"
+                image_url = img_url
         except Exception:
             pass
 
-    # 2. HTML Fallback Extraction if JSON parsing was partial
-    if not specs:
+    # 3. HTML Fallback Extraction if JSON parsing was partial
+    if len(specs) <= 1:
         spec_patterns = [
             r'<(?:li|div|span|td)[^>]*class=[\"\'][^\"\']*(?:specification--item|prop-item|spec--item|property-item|specification-item)[^\"\']*[\"\'][^>]*>(.*?)</(?:li|div|span|td)>',
             r'<span class=[\"\']title[\"\']>([^<]+)</span>\s*<span class=[\"\']value[\"\']>([^<]+)</span>'
@@ -513,6 +575,9 @@ async def run_scraper_job(
                         detailed_cand["price"] = cand["price"]
                     if not detailed_cand.get("image_url") and cand.get("image_url"):
                         detailed_cand["image_url"] = cand["image_url"]
+                    if not detailed_cand.get("title") or detailed_cand.get("title") == f"AliExpress Product #{item_id}":
+                        if cand.get("title") and cand.get("title") != f"AliExpress Product #{item_id}":
+                            detailed_cand["title"] = cand["title"]
                 else:
                     detailed_cand = cand
 

@@ -104,6 +104,9 @@ async def run_live_test_suite(
             detailed_cand["price"] = first_item["price"]
         if not detailed_cand.get("image_url") and first_item.get("image_url"):
             detailed_cand["image_url"] = first_item["image_url"]
+        if not detailed_cand.get("title") or detailed_cand.get("title") == f"AliExpress Product #{item_id}":
+            if first_item.get("title") and first_item.get("title") != f"AliExpress Product #{item_id}":
+                detailed_cand["title"] = first_item["title"]
 
         print(f" -> Scraped Specs Count: {len(detailed_cand.get('specs', []))}")
         print(f" -> Sample Specs: {detailed_cand.get('specs', [])[:3]}")
@@ -123,7 +126,8 @@ async def run_live_test_suite(
             print(f"    - [{'PASS' if crit.met else 'FAIL'}] {crit.condition}: {crit.evidence}")
 
         # Save to database
-        test_search_id = "test-live-run-1"
+        import uuid
+        test_search_id = f"test-live-run-{uuid.uuid4().hex[:6]}"
         await database.create_search(test_search_id, search_query, conditions, "AUD", "AU")
         detailed_cand["is_match"] = evaluation.is_match
         detailed_cand["confidence"] = evaluation.confidence
