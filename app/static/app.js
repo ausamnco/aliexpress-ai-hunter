@@ -77,6 +77,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const gatewayIndicator = document.getElementById('gateway-indicator');
   const gatewayValidationMessage = document.getElementById('gateway-validation-message');
 
+  // Form Gateway Elements (Direct on Main Search Card)
+  const formGatewayProvider = document.getElementById('form-gateway-provider');
+  const formGatewayKey = document.getElementById('form-gateway-key');
+  const formCustomGatewayGroup = document.getElementById('form-custom-gateway-group');
+  const formCustomGatewayUrl = document.getElementById('form-custom-gateway-url');
+  const formGatewayStatus = document.getElementById('form-gateway-status');
+  const formTestGatewayBtn = document.getElementById('form-test-gateway-btn');
+
   // Search Form Elements
   const searchForm = document.getElementById('search-form');
   const searchTermInput = document.getElementById('search-term-input');
@@ -178,34 +186,88 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function openGatewaySettings() {
+  function syncGatewayInputs() {
+    if (formGatewayProvider) formGatewayProvider.value = currentGatewayProvider;
+    if (formGatewayKey) formGatewayKey.value = currentGatewayKey;
+    if (formCustomGatewayUrl) formCustomGatewayUrl.value = currentCustomGatewayUrl;
+    if (formCustomGatewayGroup) {
+      if (currentGatewayProvider === 'custom') formCustomGatewayGroup.classList.remove('hidden');
+      else formCustomGatewayGroup.classList.add('hidden');
+    }
+
     if (gatewayProviderSelect) gatewayProviderSelect.value = currentGatewayProvider;
     if (gatewayKeyInput) gatewayKeyInput.value = currentGatewayKey;
     if (customGatewayUrlInput) customGatewayUrlInput.value = currentCustomGatewayUrl;
     toggleCustomUrlGroup();
+
+    updateGatewayIndicator();
+  }
+
+  function openGatewaySettings() {
+    if (apiKeyModal) {
+      apiKeyModal.classList.add('hidden');
+      apiKeyModal.classList.remove('flex');
+    }
+    syncGatewayInputs();
     if (gatewayValidationMessage) gatewayValidationMessage.classList.add('hidden');
-    gatewayModal.classList.remove('hidden');
-    gatewayModal.classList.add('flex');
+    if (gatewayModal) {
+      gatewayModal.classList.remove('hidden');
+      gatewayModal.classList.add('flex');
+    }
     if (window.lucide) lucide.createIcons();
   }
 
   function closeGatewaySettings() {
-    gatewayModal.classList.add('hidden');
-    gatewayModal.classList.remove('flex');
+    if (gatewayModal) {
+      gatewayModal.classList.add('hidden');
+      gatewayModal.classList.remove('flex');
+    }
   }
 
   function toggleCustomUrlGroup() {
-    if (gatewayProviderSelect && customGatewayUrlGroup) {
-      if (gatewayProviderSelect.value === 'custom') {
-        customGatewayUrlGroup.classList.remove('hidden');
-      } else {
-        customGatewayUrlGroup.classList.add('hidden');
-      }
+    const val = (gatewayProviderSelect ? gatewayProviderSelect.value : currentGatewayProvider);
+    if (customGatewayUrlGroup) {
+      if (val === 'custom') customGatewayUrlGroup.classList.remove('hidden');
+      else customGatewayUrlGroup.classList.add('hidden');
+    }
+    if (formCustomGatewayGroup) {
+      if (val === 'custom') formCustomGatewayGroup.classList.remove('hidden');
+      else formCustomGatewayGroup.classList.add('hidden');
     }
   }
 
   if (gatewayProviderSelect) {
-    gatewayProviderSelect.addEventListener('change', toggleCustomUrlGroup);
+    gatewayProviderSelect.addEventListener('change', () => {
+      currentGatewayProvider = gatewayProviderSelect.value;
+      if (formGatewayProvider) formGatewayProvider.value = currentGatewayProvider;
+      toggleCustomUrlGroup();
+    });
+  }
+
+  if (formGatewayProvider) {
+    formGatewayProvider.addEventListener('change', () => {
+      currentGatewayProvider = formGatewayProvider.value;
+      if (gatewayProviderSelect) gatewayProviderSelect.value = currentGatewayProvider;
+      toggleCustomUrlGroup();
+      localStorage.setItem('scraping_provider', currentGatewayProvider);
+    });
+  }
+
+  if (formGatewayKey) {
+    formGatewayKey.addEventListener('input', (e) => {
+      currentGatewayKey = e.target.value.trim();
+      if (gatewayKeyInput) gatewayKeyInput.value = currentGatewayKey;
+      localStorage.setItem('scraping_api_key', currentGatewayKey);
+      updateGatewayIndicator();
+    });
+  }
+
+  if (formCustomGatewayUrl) {
+    formCustomGatewayUrl.addEventListener('input', (e) => {
+      currentCustomGatewayUrl = e.target.value.trim();
+      if (customGatewayUrlInput) customGatewayUrlInput.value = currentCustomGatewayUrl;
+      localStorage.setItem('custom_gateway_url', currentCustomGatewayUrl);
+    });
   }
 
   if (openGatewayBtn) openGatewayBtn.addEventListener('click', openGatewaySettings);
@@ -222,102 +284,133 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('scraping_api_key', currentGatewayKey);
       localStorage.setItem('custom_gateway_url', currentCustomGatewayUrl);
 
-      updateGatewayIndicator();
+      syncGatewayInputs();
       closeGatewaySettings();
     });
   }
 
-  if (testGatewayBtn) {
-    testGatewayBtn.addEventListener('click', async () => {
-      const provider = gatewayProviderSelect.value;
-      const key = gatewayKeyInput.value.trim();
-      const customUrl = customGatewayUrlInput.value.trim();
+  async function performGatewayTest(provider, key, customUrl, statusEl, btnEl) {
+    btnEl.disabled = true;
+    btnEl.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-nord-8"></i><span>Testing...</span>`;
+    if (window.lucide) lucide.createIcons();
 
-      testGatewayBtn.disabled = true;
-      testGatewayBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin text-nord-8"></i><span>Testing...</span>`;
-      if (window.lucide) lucide.createIcons();
+    if (statusEl) {
+      statusEl.textContent = 'Testing connection through gateway...';
+      statusEl.className = 'text-[11px] text-nord-8 font-medium truncate';
+    }
 
-      gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-8/10 text-nord-8 border-nord-8/30 block';
-      gatewayValidationMessage.textContent = 'Testing connection to AliExpress through gateway...';
-      gatewayValidationMessage.classList.remove('hidden');
+    try {
+      const res = await fetch('/api/validate-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider,
+          api_key: key,
+          custom_gateway_url: customUrl
+        })
+      });
+      const data = await res.json();
 
-      try {
-        const res = await fetch('/api/validate-gateway', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider: provider,
-            api_key: key,
-            custom_gateway_url: customUrl
-          })
-        });
-        const data = await res.json();
-
-        if (data.valid) {
+      if (data.valid) {
+        if (statusEl) {
+          statusEl.textContent = '✅ Connected successfully!';
+          statusEl.className = 'text-[11px] text-nord-14 font-bold truncate';
+        }
+        if (gatewayValidationMessage) {
           gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-14/15 text-nord-14 border-nord-14/30 block';
           gatewayValidationMessage.innerHTML = `<strong>✅ Success!</strong> ${escapeHTML(data.message)}`;
-        } else {
-          gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
-          gatewayValidationMessage.innerHTML = `<strong>❌ Connection Failed:</strong> ${escapeHTML(data.message)}`;
+          gatewayValidationMessage.classList.remove('hidden');
         }
-      } catch (err) {
-        gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
-        gatewayValidationMessage.textContent = 'Error connecting to validation server: ' + err.message;
-      } finally {
-        testGatewayBtn.disabled = false;
-        testGatewayBtn.innerHTML = `<i data-lucide="activity" class="w-4 h-4 text-nord-8"></i><span>Test Connection</span>`;
-        if (window.lucide) lucide.createIcons();
+      } else {
+        if (statusEl) {
+          statusEl.textContent = `❌ ${data.message || 'Connection failed'}`;
+          statusEl.className = 'text-[11px] text-nord-11 font-bold truncate';
+        }
+        if (gatewayValidationMessage) {
+          gatewayValidationMessage.className = 'text-xs p-3 rounded-xl border bg-nord-11/15 text-nord-11 border-nord-11/30 block';
+          gatewayValidationMessage.innerHTML = `<strong>❌ Failed:</strong> ${escapeHTML(data.message)}`;
+          gatewayValidationMessage.classList.remove('hidden');
+        }
       }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent = 'Error connecting to validation server';
+        statusEl.className = 'text-[11px] text-nord-11 font-bold truncate';
+      }
+    } finally {
+      btnEl.disabled = false;
+      btnEl.innerHTML = `<i data-lucide="activity" class="w-3.5 h-3.5 text-nord-8"></i><span>Test Gateway</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+
+  if (testGatewayBtn) {
+    testGatewayBtn.addEventListener('click', () => {
+      performGatewayTest(
+        gatewayProviderSelect.value,
+        gatewayKeyInput.value.trim(),
+        customGatewayUrlInput.value.trim(),
+        null,
+        testGatewayBtn
+      );
     });
   }
 
-  updateGatewayIndicator();
+  if (formTestGatewayBtn) {
+    formTestGatewayBtn.addEventListener('click', () => {
+      performGatewayTest(
+        formGatewayProvider.value,
+        formGatewayKey.value.trim(),
+        formCustomGatewayUrl.value.trim(),
+        formGatewayStatus,
+        formTestGatewayBtn
+      );
+    });
+  }
+
+  syncGatewayInputs();
 
   // 5. Gemini API Key & Model Validation
   function updateApiKeyStatus(hasKey) {
     if (hasKey) {
       apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400';
       apiKeyBtnText.textContent = 'Gemini Key Active';
-      closeApiKeyModal.classList.remove('hidden');
-      cancelApiKeyBtn.classList.remove('hidden');
     } else {
       apiKeyIndicator.className = 'w-2 h-2 rounded-full bg-amber-400';
       apiKeyBtnText.textContent = 'Set Gemini Key';
-      closeApiKeyModal.classList.add('hidden');
-      cancelApiKeyBtn.classList.add('hidden');
     }
   }
 
   function checkApiKeyEntranceGate() {
-    if (!currentApiKey) {
-      geminiKeyInput.value = '';
-      keyValidationMessage.classList.add('hidden');
-      apiKeyModal.classList.remove('hidden');
-      apiKeyModal.classList.add('flex');
-      geminiKeyInput.focus();
-    } else {
+    if (currentApiKey) {
       updateApiKeyStatus(true);
       fetchModels(currentApiKey);
+    } else {
+      updateApiKeyStatus(false);
     }
   }
 
-  openApiKeyBtn.addEventListener('click', () => {
+  function openApiKeyModal() {
+    if (gatewayModal) {
+      gatewayModal.classList.add('hidden');
+      gatewayModal.classList.remove('flex');
+    }
     geminiKeyInput.value = currentApiKey;
     keyValidationMessage.classList.add('hidden');
     apiKeyModal.classList.remove('hidden');
     apiKeyModal.classList.add('flex');
     geminiKeyInput.focus();
-  });
+    if (window.lucide) lucide.createIcons();
+  }
 
-  closeApiKeyModal.addEventListener('click', () => {
+  function closeApiKeyModalFunc() {
     apiKeyModal.classList.add('hidden');
     apiKeyModal.classList.remove('flex');
-  });
+  }
 
-  cancelApiKeyBtn.addEventListener('click', () => {
-    apiKeyModal.classList.add('hidden');
-    apiKeyModal.classList.remove('flex');
-  });
+  openApiKeyBtn.addEventListener('click', openApiKeyModal);
+  closeApiKeyModal.addEventListener('click', closeApiKeyModalFunc);
+  cancelApiKeyBtn.addEventListener('click', closeApiKeyModalFunc);
 
   async function fetchModels(key) {
     try {
@@ -612,7 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
   searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!currentApiKey) {
-      checkApiKeyEntranceGate();
+      openApiKeyModal();
       return;
     }
 
