@@ -62,18 +62,18 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
                 "valid": False,
                 "quota_available": False,
                 "error_type": "PERMISSION_DENIED",
-                "message": "Permission denied. The API key does not have Gemini API access enabled in your Google Cloud project.",
+                "message": "Permission denied for this API key. Ensure Generative Language API is enabled.",
                 "models": []
             }
-        elif "resource_exhausted" in err_str or "429" in err_str or "quota" in err_str:
+        elif "resource_exhausted" in err_str or "429" in err_str:
             return {
                 "valid": True,
                 "quota_available": False,
                 "error_type": "QUOTA_EXHAUSTED",
-                "message": "API key is valid, but your request quota has been exhausted (Rate Limit 429). Please wait a minute or check AI Studio quotas.",
+                "message": "Gemini API rate limit or quota exceeded (429).",
                 "models": []
             }
-        elif "location" in err_str:
+        elif "user location is not supported" in err_str:
             return {
                 "valid": False,
                 "quota_available": False,
@@ -90,16 +90,14 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
                 "models": []
             }
 
-    # Order models by priority
+    # Order models by speed and reliability (gemini-3.5-flash & 3.6-flash respond in <2s with 0 server wait)
     priority = [
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
         "gemini-3.5-flash",
-        "gemini-3.7-flash-lite",
+        "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
+        "gemini-3.7-flash",
         "gemini-3.1-flash-lite",
-        "gemini-flash-latest",
-        "gemini-2.5-flash"
+        "gemini-flash-latest"
     ]
     sorted_models = []
     for p in priority:
@@ -109,12 +107,12 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
         if m not in sorted_models:
             sorted_models.append(m)
 
-    test_models = sorted_models if sorted_models else ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"]
+    test_models = sorted_models if sorted_models else ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
 
     # Step 2: Test content generation & quota on available models
     verified_models = []
     last_err = ""
-    for test_model in test_models[:6]:
+    for test_model in test_models[:4]:
         try:
             response = client.models.generate_content(
                 model=test_model,
@@ -147,9 +145,9 @@ async def diagnose_and_validate_key(api_key: str) -> Dict[str, Any]:
 
 async def list_available_models(api_key: str) -> List[str]:
     diag = await diagnose_and_validate_key(api_key)
-    return diag.get("models", ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"])
+    return diag.get("models", ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"])
 
-async def generate_search_variations(search_term: str, conditions: str, api_key: str, model_name: str = "gemini-3.6-flash") -> List[str]:
+async def generate_search_variations(search_term: str, conditions: str, api_key: str, model_name: str = "gemini-3.5-flash") -> List[str]:
     client = genai.Client(api_key=api_key)
     prompt = f"""
 Given a user's product search term and criteria, generate 3 to 4 distinct, highly effective AliExpress keyword search phrases (max 4-6 words each) optimized to find relevant listings.
@@ -159,7 +157,7 @@ User Conditions: {conditions}
 
 Return ONLY a valid JSON array of strings, for example: ["phrase 1", "phrase 2", "phrase 3"]
 """
-    fallback_models = [model_name, "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    fallback_models = [model_name, "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
     seen = set()
     models_to_try = [m for m in fallback_models if m and not (m in seen or seen.add(m))]
 
@@ -189,7 +187,7 @@ async def evaluate_product_criteria(
     body_snippet: str,
     user_conditions: str,
     api_key: str,
-    model_name: str = "gemini-3.6-flash"
+    model_name: str = "gemini-3.5-flash"
 ) -> ProductEvaluation:
     client = genai.Client(api_key=api_key)
     

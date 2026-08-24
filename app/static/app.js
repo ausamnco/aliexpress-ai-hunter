@@ -114,6 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const countMatches = document.getElementById('count-matches');
   const countExcluded = document.getElementById('count-excluded');
   const filterTabBtns = document.querySelectorAll('.filter-tab-btn');
+  const stopSearchBtn = document.getElementById('stop-search-btn');
+  const liveStatusIndicator = document.getElementById('live-status-indicator');
 
   // Detail Modal Elements
   const productDetailModal = document.getElementById('product-detail-modal');
@@ -479,7 +481,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 6. Search Terms Chips
+  // 6. Search Terms Chips & Instant Suggestions
+  const LOCAL_SUGGESTIONS = [
+    '2.4G ANC headset',
+    'wireless gaming headset 2.4ghz dongle',
+    'active noise cancelling headphones',
+    'bluetooth 5.4 earbuds with anc',
+    'mechanical keyboard tri-mode wireless',
+    'smart watch amoled display',
+    'usb c hub 10 in 1 4k 60hz',
+    'gan fast charger 100w',
+    'portable monitor 15.6 144hz',
+    'drone 4k camera with brushless motor',
+    'nvme ssd enclosure 40gbps usb4',
+    'ergonomic vertical mouse wireless',
+    'action camera 4k 60fps waterproof',
+    'car dash cam front and rear 4k',
+    'laser engraving machine cnc',
+    'soldering station t12 portable',
+    'esp32 s3 development board wifi bluetooth',
+    'mini pc ryzen 7 7840hs 32gb ram'
+  ];
+
   function renderSearchChips() {
     searchChipsContainer.innerHTML = '';
     if (searchTermsList.length === 0) {
@@ -517,7 +540,99 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function renderSuggestionsDropdown(items) {
+    if (!items || items.length === 0) {
+      suggestionsDropdown.innerHTML = '';
+      suggestionsDropdown.classList.add('hidden');
+      return;
+    }
+
+    suggestionsDropdown.innerHTML = '';
+    activeSuggestIndex = -1;
+
+    items.forEach((itemText, idx) => {
+      const row = document.createElement('div');
+      row.className = 'suggestion-item px-3.5 py-2 text-xs text-nord-5 hover:bg-nord-8/15 hover:text-nord-8 cursor-pointer flex items-center justify-between transition';
+      row.innerHTML = `
+        <span class="truncate">${escapeHTML(itemText)}</span>
+        <span class="text-[10px] text-nord-3 font-mono">↵ add</span>
+      `;
+      row.addEventListener('click', () => {
+        addSearchTerm(itemText);
+        searchTermInput.value = '';
+        suggestionsDropdown.classList.add('hidden');
+        searchTermInput.focus();
+      });
+      suggestionsDropdown.appendChild(row);
+    });
+
+    suggestionsDropdown.classList.remove('hidden');
+  }
+
+  function filterAndDisplaySuggestions(query) {
+    const clean = query.trim().toLowerCase();
+    if (!clean) {
+      suggestionsDropdown.classList.add('hidden');
+      return;
+    }
+
+    // 1. Instant local matching (0ms latency from first keystroke)
+    const localMatches = LOCAL_SUGGESTIONS.filter(s => s.toLowerCase().includes(clean)).slice(0, 6);
+    renderSuggestionsDropdown(localMatches);
+
+    // 2. Concurrently fetch and merge fresh suggestions
+    clearTimeout(suggestDebounceTimeout);
+    suggestDebounceTimeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/suggestions?q=${encodeURIComponent(clean)}`);
+        const data = await res.json();
+        if (data.suggestions && data.suggestions.length > 0 && searchTermInput.value.trim().toLowerCase() === clean) {
+          const combined = Array.from(new Set([...localMatches, ...data.suggestions])).slice(0, 8);
+          renderSuggestionsDropdown(combined);
+        }
+      } catch (err) {}
+    }, 120);
+  }
+
+  searchTermInput.addEventListener('input', (e) => {
+    filterAndDisplaySuggestions(e.target.value);
+  });
+
+  searchTermInput.addEventListener('focus', (e) => {
+    if (e.target.value.trim()) {
+      filterAndDisplaySuggestions(e.target.value);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!searchTermInput.contains(e.target) && !suggestionsDropdown.contains(e.target)) {
+      suggestionsDropdown.classList.add('hidden');
+    }
+  });
+
   searchTermInput.addEventListener('keydown', (e) => {
+    const items = suggestionsDropdown.querySelectorAll('.suggestion-item');
+    if (!suggestionsDropdown.classList.contains('hidden') && items.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeSuggestIndex = (activeSuggestIndex + 1) % items.length;
+        items.forEach((it, i) => it.classList.toggle('bg-nord-8/20', i === activeSuggestIndex));
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeSuggestIndex = (activeSuggestIndex - 1 + items.length) % items.length;
+        items.forEach((it, i) => it.classList.toggle('bg-nord-8/20', i === activeSuggestIndex));
+        return;
+      } else if (e.key === 'Enter' && activeSuggestIndex >= 0 && items[activeSuggestIndex]) {
+        e.preventDefault();
+        items[activeSuggestIndex].click();
+        return;
+      } else if (e.key === 'Escape') {
+        suggestionsDropdown.classList.add('hidden');
+        return;
+      }
+    }
+
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       if (searchTermInput.value.trim()) {
@@ -528,7 +643,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 7. Dynamic Numbered Conditions
+  // 7. Dynamic Numbered Conditions with Enter-Key Cementation
   function renderConditions() {
     conditionsContainer.innerHTML = '';
     conditionsList.forEach((cond, index) => {
@@ -536,7 +651,7 @@ document.addEventListener('DOMContentLoaded', () => {
       row.className = 'flex items-center gap-2 relative';
       row.innerHTML = `
         <span class="w-6 h-6 rounded-lg bg-nord-2 text-nord-4 font-mono font-bold text-xs flex items-center justify-center flex-shrink-0">${index + 1}</span>
-        <input type="text" data-index="${index}" value="${escapeHTML(cond)}" placeholder="Condition ${index + 1} (e.g. Under $80 AUD)" class="condition-input flex-1 theme-bg-input border theme-border rounded-xl px-3.5 py-2 text-xs text-nord-5 focus:outline-none focus:border-nord-8">
+        <input type="text" data-index="${index}" value="${escapeHTML(cond)}" placeholder="Condition ${index + 1} (e.g. Under $80 AUD, press Enter to cement)" class="condition-input flex-1 theme-bg-input border theme-border rounded-xl px-3.5 py-2 text-xs text-nord-5 focus:outline-none focus:border-nord-8">
         ${conditionsList.length > 1 ? `
           <button type="button" data-index="${index}" class="remove-condition-btn text-nord-3 hover:text-nord-11 p-1 transition" title="Remove condition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -552,6 +667,29 @@ document.addEventListener('DOMContentLoaded', () => {
       input.addEventListener('input', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
         conditionsList[idx] = e.target.value;
+      });
+
+      // Cement condition on Enter key and advance without submitting the search form!
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const idx = parseInt(e.target.dataset.index, 10);
+          const val = e.target.value.trim();
+          conditionsList[idx] = val;
+
+          // If this is the last condition and has text, create a new row
+          if (val && idx === conditionsList.length - 1 && conditionsList.length < 10) {
+            conditionsList.push('');
+            renderConditions();
+            const allInputs = conditionsContainer.querySelectorAll('.condition-input');
+            if (allInputs[idx + 1]) allInputs[idx + 1].focus();
+          } else if (idx < conditionsList.length - 1) {
+            const allInputs = conditionsContainer.querySelectorAll('.condition-input');
+            if (allInputs[idx + 1]) allInputs[idx + 1].focus();
+          } else {
+            input.blur();
+          }
+        }
       });
     });
 
@@ -831,13 +969,35 @@ document.addEventListener('DOMContentLoaded', () => {
         liveStageTitle.textContent = 'Search & AI Evaluation Complete!';
         liveProgressBadge.textContent = '100%';
         liveProgressBar.style.width = '100%';
+        if (liveStatusIndicator) {
+          liveStatusIndicator.classList.remove('animate-ping', 'bg-nord-8', 'bg-nord-11');
+          liveStatusIndicator.classList.add('bg-nord-14');
+        }
         startSearchBtn.disabled = false;
         startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
         if (activeEventSource) activeEventSource.close();
         break;
 
+      case 'search_cancelled':
+        liveStageTitle.textContent = 'Search stopped by user';
+        if (liveStatusIndicator) {
+          liveStatusIndicator.classList.remove('animate-ping', 'bg-nord-8', 'bg-nord-14');
+          liveStatusIndicator.classList.add('bg-nord-11');
+        }
+        startSearchBtn.disabled = false;
+        startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        if (activeEventSource) {
+          activeEventSource.close();
+          activeEventSource = null;
+        }
+        break;
+
       case 'search_error':
         liveStageTitle.textContent = `Error: ${event.data?.error || 'Search encountered an error'}`;
+        if (liveStatusIndicator) {
+          liveStatusIndicator.classList.remove('animate-ping', 'bg-nord-8');
+          liveStatusIndicator.classList.add('bg-nord-11');
+        }
         startSearchBtn.disabled = false;
         startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
         if (activeEventSource) activeEventSource.close();
@@ -849,6 +1009,36 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeEventSource) activeEventSource.close();
         break;
     }
+  }
+
+  // Stop Search Button Click Handler
+  if (stopSearchBtn) {
+    stopSearchBtn.addEventListener('click', async () => {
+      if (!currentSearchId) return;
+      stopSearchBtn.disabled = true;
+      stopSearchBtn.innerHTML = `<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i><span>Stopping...</span>`;
+      if (window.lucide) lucide.createIcons();
+
+      try {
+        await fetch(`/api/search/${currentSearchId}/stop`, { method: 'POST' });
+      } catch (err) {}
+
+      if (activeEventSource) {
+        activeEventSource.close();
+        activeEventSource = null;
+      }
+
+      liveStageTitle.textContent = 'Search stopped by user';
+      if (liveStatusIndicator) {
+        liveStatusIndicator.classList.remove('animate-ping', 'bg-nord-8');
+        liveStatusIndicator.classList.add('bg-nord-11');
+      }
+      startSearchBtn.disabled = false;
+      startSearchBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+      stopSearchBtn.disabled = false;
+      stopSearchBtn.innerHTML = `<i data-lucide="square" class="w-3 h-3 fill-current"></i><span>Stop</span>`;
+      if (window.lucide) lucide.createIcons();
+    });
   }
 
   // 11. History Management

@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "AliExpress AI Product Hunter",
+  "version": "1.0.0",
+  "description": "Instant AI criteria verification and visual match filtering directly on AliExpress search results.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "default_title": "AliExpress AI Hunter"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.aliexpress.com/*",
+    "*://*.aliexpress.us/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.aliexpress.com/*",
+        "*://*.aliexpress.us/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

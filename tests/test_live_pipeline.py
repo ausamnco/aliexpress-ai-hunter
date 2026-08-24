@@ -111,7 +111,7 @@ async def run_live_test_suite(
         print(f" -> Scraped Specs Count: {len(detailed_cand.get('specs', []))}")
         print(f" -> Sample Specs: {detailed_cand.get('specs', [])[:3]}")
 
-        model_to_use = "gemini-3.7-flash" if "gemini-3.7-flash" in diag.get("models", []) else "gemini-2.5-flash"
+        model_to_use = diag["models"][0] if diag.get("models") else "gemini-3.6-flash"
         evaluation = await ai_evaluator.evaluate_product(
             item=detailed_cand,
             conditions=conditions,

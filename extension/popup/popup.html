@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AliExpress AI Hunter</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="header">
+      <div class="brand">
+        <span class="logo-dot"></span>
+        <h1>AliExpress AI Hunter</h1>
+      </div>
+      <span class="badge">Live DOM</span>
+    </header>
+
+    <main class="main">
+      <div class="form-group">
+        <label for="gemini-key">Gemini API Key</label>
+        <input type="password" id="gemini-key" placeholder="AQ.Ab8... or AI Studio key" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label for="conditions">Strict Conditions (1 per line)</label>
+        <textarea id="conditions" rows="3" placeholder="1. Active Noise Cancellation (ANC)&#10;2. 2.4GHz USB wireless dongle included&#10;3. Under $100 AUD"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group half">
+          <label for="model-select">Model</label>
+          <select id="model-select">
+            <option value="gemini-3.6-flash" selected>Gemini 3.6 Flash</option>
+            <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+          </select>
+        </div>
+        <div class="form-group half">
+          <label for="server-url">Backend Server</label>
+          <input type="text" id="server-url" value="http://localhost:8000" placeholder="http://localhost:8000">
+        </div>
+      </div>
+
+      <button id="analyze-btn" class="primary-btn">
+        <span>⚡ Analyze Current Page (Instant)</span>
+      </button>
+
+      <div id="status-box" class="status-box hidden">
+        <div id="status-text" class="status-text">Scanning products on page...</div>
+      </div>
+
+      <div id="results-summary" class="results-summary hidden">
+        <div class="stat-card match">
+          <span class="stat-num" id="stat-matches">0</span>
+          <span class="stat-label">Matches</span>
+        </div>
+        <div class="stat-card total">
+          <span class="stat-num" id="stat-total">0</span>
+          <span class="stat-label">Products Analyzed</span>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <span>0 Anti-Bot Friction • 100% Client-Side Speed</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

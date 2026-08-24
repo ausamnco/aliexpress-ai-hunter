@@ -16,13 +16,20 @@ logger = logging.getLogger(__name__)
 class ScraperSession:
     def __init__(self, search_id: str):
         self.search_id = search_id
-        self.status = "pending"  # pending, running, completed, error, stopped
+        self.status = "pending"  # pending, running, completed, error, cancelled
         self.stage = "Initializing"
         self.progress_pct = 0
         self.event_queue: asyncio.Queue = asyncio.Queue()
         self.discovered_items: Dict[str, Dict[str, Any]] = {}
         self.evaluated_items: List[Dict[str, Any]] = []
         self.error_message: Optional[str] = None
+        self.is_cancelled: bool = False
+
+    async def cancel(self):
+        self.is_cancelled = True
+        self.status = "cancelled"
+        self.stage = "Search stopped by user"
+        await self.emit_event("search_cancelled", {"message": "Search was stopped by user."})
 
     async def emit_event(self, event_type: str, data: Optional[Dict[str, Any]] = None):
         payload = {
@@ -545,60 +552,70 @@ async def run_scraper_job(
             session.stage = msg
             await session.emit_event("progress_update", {"message": msg})
 
-        # 2. Evaluate candidate products with Gemini AI
+        # Check cancellation before evaluation
+        if session.is_cancelled:
+            logger.info(f"Search {search_id} cancelled by user.")
+            return
+
+        # 2. Evaluate candidate products concurrently with Gemini AI
         candidate_list = list(discovered_candidates.values())[:max_candidates]
         if candidate_list:
-            session.stage = f"Found {len(candidate_list)} candidate products. Evaluating specifications with {model_name}..."
+            session.stage = f"Found {len(candidate_list)} candidate products. Running high-concurrency evaluation with {model_name}..."
             session.progress_pct = 45
             await session.emit_event("evaluation_phase_started", {"total_candidates": len(candidate_list)})
 
-            for idx, cand in enumerate(candidate_list):
-                item_id = cand["item_id"]
-                session.stage = f"Evaluating product {idx + 1}/{len(candidate_list)}: '{cand['title'][:45]}...'"
-                session.progress_pct = 45 + int((idx / max(1, len(candidate_list))) * 50)
-                await session.emit_event("item_evaluating", {"item_id": item_id, "title": cand["title"]})
+            sem = asyncio.Semaphore(10)  # Evaluate up to 10 products concurrently
 
-                # Fetch deep item details and specifications via Gateway
-                item_url = f"https://www.aliexpress.com/item/{item_id}.html"
-                item_status, item_html = await GatewayScraperClient.fetch_page(
-                    target_url=item_url,
-                    provider=scraping_provider,
-                    api_key=scraping_api_key,
-                    ship_country=ship_country,
-                    currency=currency,
-                    custom_gateway_url=custom_gateway_url
-                )
+            async def evaluate_single_candidate(cand: Dict[str, Any], idx: int):
+                if session.is_cancelled:
+                    return None
+                
+                async with sem:
+                    if session.is_cancelled:
+                        return None
+                    
+                    item_id = cand["item_id"]
+                    detailed_cand = dict(cand)
+                    if "specs" not in detailed_cand:
+                        detailed_cand["specs"] = []
 
-                if item_status == 200:
-                    detailed_cand = parse_item_detail(item_html, item_id)
-                    if cand.get("price") != "N/A" and detailed_cand.get("price") == "N/A":
-                        detailed_cand["price"] = cand["price"]
-                    if not detailed_cand.get("image_url") and cand.get("image_url"):
-                        detailed_cand["image_url"] = cand["image_url"]
-                    if not detailed_cand.get("title") or detailed_cand.get("title") == f"AliExpress Product #{item_id}":
-                        if cand.get("title") and cand.get("title") != f"AliExpress Product #{item_id}":
-                            detailed_cand["title"] = cand["title"]
-                else:
-                    detailed_cand = cand
+                    try:
+                        evaluation: ProductEvaluation = await ai_evaluator.evaluate_product(
+                            item=detailed_cand,
+                            conditions=conditions,
+                            api_key=gemini_api_key,
+                            model_name=model_name
+                        )
+                        detailed_cand["is_match"] = evaluation.is_match
+                        detailed_cand["confidence"] = evaluation.confidence
+                        detailed_cand["verdict_reason"] = evaluation.verdict_reason
+                        detailed_cand["criteria_breakdown"] = [c.model_dump() for c in evaluation.criteria_evaluations]
+                    except Exception as e:
+                        logger.warning(f"Evaluation error for item {item_id}: {e}")
+                        detailed_cand["is_match"] = False
+                        detailed_cand["confidence"] = 0.0
+                        detailed_cand["verdict_reason"] = f"Evaluation note: {str(e)[:80]}"
+                        detailed_cand["criteria_breakdown"] = []
 
-                # Evaluate against user conditions using Gemini
-                evaluation: ProductEvaluation = await ai_evaluator.evaluate_product(
-                    item=detailed_cand,
-                    conditions=conditions,
-                    api_key=gemini_api_key,
-                    model_name=model_name
-                )
+                    if session.is_cancelled:
+                        return None
 
-                detailed_cand["is_match"] = evaluation.is_match
-                detailed_cand["confidence"] = evaluation.confidence
-                detailed_cand["verdict_reason"] = evaluation.verdict_reason
-                detailed_cand["criteria_breakdown"] = [c.model_dump() for c in evaluation.criteria_evaluations]
+                    # Save in database
+                    await database.save_search_result(search_id, detailed_cand)
+                    session.evaluated_items.append(detailed_cand)
 
-                # Save in database
-                await database.save_search_result(search_id, detailed_cand)
-                session.evaluated_items.append(detailed_cand)
+                    completed_count = len(session.evaluated_items)
+                    session.progress_pct = min(95, 45 + int((completed_count / max(1, len(candidate_list))) * 50))
+                    session.stage = f"Evaluated {completed_count}/{len(candidate_list)} products with {model_name}..."
+                    await session.emit_event("item_evaluated", detailed_cand)
+                    return detailed_cand
 
-                await session.emit_event("item_evaluated", detailed_cand)
+            # Run all candidate evaluations concurrently
+            await asyncio.gather(*(evaluate_single_candidate(c, i) for i, c in enumerate(candidate_list)), return_exceptions=True)
+
+        if session.is_cancelled:
+            logger.info(f"Search {search_id} cancelled by user.")
+            return
 
         session.status = "completed"
         match_count = sum(1 for item in session.evaluated_items if item.get("is_match"))
