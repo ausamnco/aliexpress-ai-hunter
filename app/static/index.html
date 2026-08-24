@@ -1,44 +1,53 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AliExpress AI Product Hunter</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #2E3440;
+      color: #ECEFF4;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .theme-bg-card { background-color: #3B4252; }
+    .theme-bg-input { background-color: #2E3440; }
+    .theme-border { border-color: #4C566A; }
+    .nav-btn.active {
+      background: linear-gradient(135deg, #5E81AC 0%, #88C0D0 100%);
+      color: #2E3440;
+      box-shadow: 0 4px 14px rgba(136, 192, 208, 0.3);
+    }
+    .filter-tab-btn.active {
+      background-color: #88C0D0;
+      color: #2E3440;
+      font-weight: 700;
+    }
+    /* Light Theme Overrides */
+    .light-theme {
+      background-color: #ECEFF4;
+      color: #2E3440;
+    }
+    .light-theme .theme-bg-card { background-color: #FFFFFF; }
+    .light-theme .theme-bg-input { background-color: #E5E9F0; color: #2E3440; }
+    .light-theme .theme-border { border-color: #D8DEE9; }
+  </style>
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
-          fontFamily: {
-            sans: ['Plus Jakarta Sans', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
           colors: {
             nord: {
-              0: '#2E3440',
-              1: '#3B4252',
-              2: '#434C5E',
-              3: '#4C566A',
-              4: '#D8DEE9',
-              5: '#E5E9F0',
-              6: '#ECEFF4',
-              7: '#8FBCBB',
-              8: '#88C0D0',
-              9: '#81A1C1',
-              10: '#5E81AC',
-              11: '#BF616A',
-              12: '#D08770',
-              13: '#EBCB8B',
-              14: '#A3BE8C',
-              15: '#B48EAD',
+              0: '#2E3440', 1: '#3B4252', 2: '#434C5E', 3: '#4C566A',
+              4: '#D8DEE9', 5: '#E5E9F0', 6: '#ECEFF4',
+              7: '#8FBCBB', 8: '#88C0D0', 9: '#81A1C1', 10: '#5E81AC',
+              11: '#BF616A', 12: '#D08770', 13: '#EBCB8B', 14: '#A3BE8C', 15: '#B48EAD',
             }
           }
         }
@@ -57,7 +66,7 @@
         </div>
         <div>
           <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-nord-6 via-nord-4 to-nord-8 bg-clip-text text-transparent">AliExpress AI Hunter</span>
-          <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-nord-8/15 text-nord-8 border border-nord-8/30 font-medium">Gemini Powered</span>
+          <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-nord-8/15 text-nord-8 border border-nord-8/30 font-medium">Camoufox Stealth Engine</span>
         </div>
       </div>
 
@@ -74,7 +83,7 @@
         </button>
       </nav>
 
-      <!-- Header Controls: Theme switch, Gateway & API key -->
+      <!-- Header Controls: Theme switch & API key -->
       <div class="flex items-center gap-2 sm:gap-3">
         <!-- Theme Toggle -->
         <button id="theme-toggle-btn" class="p-2 rounded-xl border theme-border theme-bg-input hover:border-nord-8 transition text-nord-4" title="Toggle Theme">
@@ -82,41 +91,37 @@
           <i id="theme-icon-light" data-lucide="sun" class="w-4 h-4"></i>
         </button>
 
-        <!-- Scraping Gateway Status Button -->
-        <button id="open-gateway-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-xl border theme-border theme-bg-input hover:border-nord-8 text-xs font-medium transition-all">
-          <span id="gateway-indicator" class="w-2 h-2 rounded-full bg-nord-13"></span>
-          <span id="gateway-btn-text" class="hidden md:inline">Gateway Settings</span>
-        </button>
-
-        <!-- API Key Status Button -->
-        <button id="open-api-key-btn" class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border theme-border theme-bg-input hover:border-nord-8 text-xs font-medium transition-all">
+        <!-- Gemini API Key Status Button -->
+        <button id="open-api-key-btn" class="flex items-center gap-2 px-3 py-1.5 rounded-xl border theme-border theme-bg-input hover:border-nord-8 text-xs font-medium transition-all">
           <span id="api-key-indicator" class="w-2 h-2 rounded-full bg-amber-400"></span>
-          <span id="api-key-btn-text" class="hidden sm:inline">Set Gemini Key</span>
+          <span id="api-key-btn-text" class="hidden md:inline">Set Gemini Key</span>
         </button>
       </div>
     </div>
   </header>
 
-  <!-- Main Content Container -->
+  <!-- Main Content Area -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-    <!-- TAB 1: NEW SEARCH -->
-    <section id="search-section" class="tab-content">
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    
+    <!-- SEARCH SECTION (Primary Tab) -->
+    <div id="search-section" class="space-y-8">
+      
+      <!-- Top Grid: Left Search Input Card, Right Progress Stream -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
-        <!-- Left Column: Search & Criteria Input Form -->
+        <!-- Left Column: Search & Criteria Configuration Card -->
         <div class="lg:col-span-5 flex flex-col gap-6">
-          <div class="theme-bg-card border theme-border rounded-2xl p-6 shadow-xl relative overflow-hidden">
-            <div class="absolute top-0 right-0 w-32 h-32 bg-nord-8/5 rounded-full blur-3xl -z-0"></div>
-            
-            <h2 class="text-lg font-bold text-nord-6 mb-1 flex items-center gap-2">
-              <i data-lucide="sliders" class="w-5 h-5 text-nord-8"></i>
+          <div class="theme-bg-card border theme-border rounded-3xl p-6 shadow-xl relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-nord-8/5 rounded-full blur-2xl pointer-events-none"></div>
+
+            <h2 class="text-base font-bold text-nord-6 mb-4 flex items-center gap-2">
+              <i data-lucide="filter" class="w-4 h-4 text-nord-8"></i>
               Product Criteria & Search
             </h2>
-            <p class="text-xs text-nord-4 opacity-80 mb-6">Enter search terms and add numbered criteria for Gemini AI verification.</p>
 
-            <form id="search-form" class="space-y-5 relative z-10">
-              <!-- Search Term(s) with Gmail-Style Token Chips & Live Autofill -->
+            <form id="search-form" class="space-y-5">
+              
+              <!-- Search Term Input & Suggestions -->
               <div class="relative">
                 <div class="flex items-center justify-between mb-1.5">
                   <label class="block text-xs font-bold uppercase tracking-wider text-nord-4">
@@ -130,16 +135,16 @@
                   <input type="text" id="search-term-input" autocomplete="off" placeholder="e.g. 2.4G ANC headset (press Enter to confirm)" class="w-full theme-bg-input border theme-border rounded-xl pl-10 pr-4 py-2.5 text-sm text-nord-5 placeholder-nord-3 focus:outline-none focus:border-nord-8 focus:ring-1 focus:ring-nord-8 transition-all">
                 </div>
 
-                <!-- Gmail-Style Confirmed Search Terms Chips Box -->
+                <!-- Confirmed Search Terms Chips Box -->
                 <div id="search-chips-container" class="mt-2.5 flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-nord-0/40 border theme-border rounded-xl">
                   <span id="chips-empty-hint" class="text-xs text-nord-3 italic px-1 py-0.5">No search terms confirmed yet. Type above and press Enter.</span>
                 </div>
 
-                <!-- Autofill Suggestions Dropdown -->
+                <!-- Instant Autofill Suggestions Dropdown -->
                 <div id="suggestions-dropdown" class="absolute left-0 right-0 top-full mt-1 theme-bg-card border theme-border rounded-xl shadow-2xl overflow-hidden z-30 hidden divide-y divide-nord-2/40"></div>
               </div>
 
-              <!-- Dynamic Numbered Strict Conditions -->
+              <!-- Dynamic Numbered Strict Conditions with Enter-Key Cementation -->
               <div>
                 <div class="flex items-center justify-between mb-1.5">
                   <label class="block text-xs font-bold uppercase tracking-wider text-nord-4">
@@ -149,23 +154,21 @@
                   <span id="condition-count-badge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-nord-2 text-nord-4">1 / 10</span>
                 </div>
                 
-                <!-- Dynamic Conditions Container -->
                 <div id="conditions-container" class="space-y-2.5">
                   <!-- Condition Rows dynamically populated here -->
                 </div>
 
-                <!-- Add Condition Button -->
                 <button type="button" id="add-condition-btn" class="mt-3 w-full py-2 px-3 rounded-xl border border-dashed border-nord-3 hover:border-nord-8 hover:bg-nord-8/10 text-xs font-semibold text-nord-4 hover:text-nord-8 transition flex items-center justify-center gap-1.5">
                   <i data-lucide="plus-circle" class="w-4 h-4"></i>
                   <span>Add Condition (Max 10)</span>
                 </button>
               </div>
 
-              <!-- Search & Model Settings (Always Visible) -->
+              <!-- Search & Destination Settings -->
               <div class="pt-4 border-t theme-border">
                 <h3 class="text-xs font-bold uppercase tracking-wider text-nord-4 mb-3 flex items-center gap-1.5">
                   <i data-lucide="settings-2" class="w-3.5 h-3.5 text-nord-8"></i>
-                  Search & Model Settings
+                  Localization & Model Settings
                 </h3>
 
                 <div class="grid grid-cols-2 gap-3 text-xs">
@@ -183,92 +186,46 @@
                         <option value="FR">France (FR)</option>
                         <option value="JP">Japan (JP)</option>
                         <option value="SG">Singapore (SG)</option>
-                        <option value="IT">Italy (IT)</option>
-                        <option value="ES">Spain (ES)</option>
-                        <option value="NL">Netherlands (NL)</option>
-                        <option value="BR">Brazil (BR)</option>
-                        <option value="MX">Mexico (MX)</option>
-                        <option value="KR">South Korea (KR)</option>
                       </optgroup>
                       <optgroup label="All Countries">
-                        <option value="AR">Argentina</option>
-                        <option value="AT">Austria</option>
-                        <option value="BE">Belgium</option>
-                        <option value="BG">Bulgaria</option>
-                        <option value="CL">Chile</option>
-                        <option value="CO">Colombia</option>
-                        <option value="HR">Croatia</option>
-                        <option value="CZ">Czech Republic</option>
-                        <option value="DK">Denmark</option>
-                        <option value="EG">Egypt</option>
-                        <option value="FI">Finland</option>
-                        <option value="GR">Greece</option>
-                        <option value="HK">Hong Kong</option>
-                        <option value="HU">Hungary</option>
+                        <option value="IT">Italy</option>
+                        <option value="ES">Spain</option>
+                        <option value="NL">Netherlands</option>
+                        <option value="BR">Brazil</option>
+                        <option value="MX">Mexico</option>
+                        <option value="KR">South Korea</option>
                         <option value="IN">India</option>
-                        <option value="ID">Indonesia</option>
-                        <option value="IE">Ireland</option>
-                        <option value="IL">Israel</option>
                         <option value="MY">Malaysia</option>
-                        <option value="NO">Norway</option>
                         <option value="PH">Philippines</option>
-                        <option value="PL">Poland</option>
-                        <option value="PT">Portugal</option>
-                        <option value="RO">Romania</option>
-                        <option value="SA">Saudi Arabia</option>
-                        <option value="ZA">South Africa</option>
                         <option value="SE">Sweden</option>
-                        <option value="CH">Switzerland</option>
-                        <option value="TW">Taiwan</option>
-                        <option value="TH">Thailand</option>
-                        <option value="TR">Turkey</option>
-                        <option value="AE">United Arab Emirates</option>
-                        <option value="VN">Vietnam</option>
+                        <option value="NO">Norway</option>
                       </optgroup>
                     </select>
                   </div>
 
-                  <!-- Currency (Auto-synced) -->
+                  <!-- Currency -->
                   <div class="col-span-2 sm:col-span-1">
                     <label class="block text-nord-4 mb-1 font-medium">Currency</label>
-                    <select id="currency-select" class="w-full theme-bg-input border theme-border rounded-xl px-2.5 py-2 text-nord-5 font-mono font-medium focus:outline-none focus:border-nord-8">
-                      <option value="AUD" selected>AUD (AU$)</option>
+                    <select id="currency-select" class="w-full theme-bg-input border theme-border rounded-xl px-2.5 py-2 text-nord-5 font-medium focus:outline-none focus:border-nord-8">
+                      <option value="AUD" selected>AUD ($)</option>
                       <option value="USD">USD ($)</option>
-                      <option value="EUR">EUR (€)</option>
                       <option value="GBP">GBP (£)</option>
-                      <option value="CAD">CAD (CA$)</option>
-                      <option value="NZD">NZD (NZ$)</option>
+                      <option value="EUR">EUR (€)</option>
+                      <option value="CAD">CAD ($)</option>
+                      <option value="NZD">NZD ($)</option>
                       <option value="JPY">JPY (¥)</option>
-                      <option value="SGD">SGD (SG$)</option>
-                      <option value="BRL">BRL (R$)</option>
-                      <option value="MXN">MXN (MX$)</option>
-                      <option value="KRW">KRW (₩)</option>
-                      <option value="CHF">CHF (CHF)</option>
-                      <option value="SEK">SEK (kr)</option>
-                      <option value="NOK">NOK (kr)</option>
-                      <option value="DKK">DKK (kr)</option>
-                      <option value="PLN">PLN (zł)</option>
-                      <option value="INR">INR (₹)</option>
-                      <option value="PHP">PHP (₱)</option>
-                      <option value="THB">THB (฿)</option>
-                      <option value="MYR">MYR (RM)</option>
-                      <option value="IDR">IDR (Rp)</option>
-                      <option value="VND">VND (₫)</option>
-                      <option value="SAR">SAR (SR)</option>
-                      <option value="AED">AED (AED)</option>
-                      <option value="ZAR">ZAR (R)</option>
-                      <option value="TRY">TRY (₺)</option>
+                      <option value="SGD">SGD ($)</option>
                     </select>
                   </div>
 
-                  <!-- Gemini Model Selection (Dynamic) -->
+                  <!-- Gemini Model -->
                   <div class="col-span-2 sm:col-span-1">
-                    <label class="block text-nord-4 mb-1 font-medium">Gemini Model</label>
-                    <select id="model-select" class="w-full theme-bg-input border theme-border rounded-xl px-2.5 py-2 text-nord-5 font-mono font-medium focus:outline-none focus:border-nord-8">
-                      <option value="gemini-3.7-flash" selected>gemini-3.7-flash (Recommended)</option>
-                      <option value="gemini-3.7-flash-lite">gemini-3.7-flash-lite</option>
-                      <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                      <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                    <label class="block text-nord-4 mb-1 font-medium">AI Model</label>
+                    <select id="model-select" class="w-full theme-bg-input border theme-border rounded-xl px-2.5 py-2 text-nord-5 font-medium focus:outline-none focus:border-nord-8">
+                      <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fastest)</option>
+                      <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+                      <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+                      <option value="gemini-3.7-flash">gemini-3.7-flash</option>
                     </select>
                   </div>
 
@@ -279,55 +236,13 @@
                       <option value="20">20 Products</option>
                       <option value="30" selected>30 Products</option>
                       <option value="50">50 Products</option>
-                      <option value="75">75 Products</option>
                     </select>
                   </div>
-                </div>
-              </div>
-
-              <!-- Scraping Gateway Configuration (Always Visible on Form) -->
-              <div class="pt-4 border-t theme-border space-y-3">
-                <div class="flex items-center justify-between">
-                  <h3 class="text-xs font-bold uppercase tracking-wider text-nord-4 flex items-center gap-1.5">
-                    <i data-lucide="shield-check" class="w-3.5 h-3.5 text-nord-8"></i>
-                    Scraping Gateway (Anti-Bot Bypass)
-                  </h3>
-                  <a href="https://www.zenrows.com/" target="_blank" class="text-[10px] text-nord-8 underline hover:text-nord-7">Get Free Key (ZenRows)</a>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3 text-xs">
-                  <div class="col-span-2 sm:col-span-1">
-                    <label class="block text-nord-4 mb-1 font-medium">Provider</label>
-                    <select id="form-gateway-provider" class="w-full theme-bg-input border theme-border rounded-xl px-2.5 py-2 text-nord-5 font-semibold focus:outline-none focus:border-nord-8">
-                      <option value="zenrows" selected>ZenRows (Recommended)</option>
-                      <option value="scrapfly">ScrapFly</option>
-                      <option value="scraperapi">ScraperAPI</option>
-                      <option value="custom">Custom Proxy / Gateway URL</option>
-                    </select>
-                  </div>
-
-                  <div class="col-span-2 sm:col-span-1">
-                    <label class="block text-nord-4 mb-1 font-medium">Gateway API Key</label>
-                    <input type="password" id="form-gateway-key" placeholder="Paste Gateway Key..." class="w-full theme-bg-input border theme-border rounded-xl px-3 py-2 text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
-                  </div>
-
-                  <div id="form-custom-gateway-group" class="col-span-2 hidden">
-                    <label class="block text-nord-4 mb-1 font-medium">Custom Gateway URL</label>
-                    <input type="text" id="form-custom-gateway-url" placeholder="https://proxy.example.com/api?url={url}" class="w-full theme-bg-input border theme-border rounded-xl px-3 py-2 text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
-                  </div>
-                </div>
-
-                <div class="flex items-center justify-between gap-2 pt-1">
-                  <span id="form-gateway-status" class="text-[11px] text-nord-3 truncate">Enter key for automatic anti-bot bypass</span>
-                  <button type="button" id="form-test-gateway-btn" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-nord-5 bg-nord-2 hover:bg-nord-3 transition flex items-center gap-1 flex-shrink-0">
-                    <i data-lucide="activity" class="w-3.5 h-3.5 text-nord-8"></i>
-                    <span>Test Gateway</span>
-                  </button>
                 </div>
               </div>
 
               <!-- Submit Button -->
-              <button type="submit" id="start-search-btn" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 text-nord-0 font-bold text-sm shadow-lg shadow-nord-8/20 flex items-center justify-center gap-2 transition-all transform active:scale-[0.98]">
+              <button type="submit" id="start-search-btn" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 text-nord-0 font-bold text-sm shadow-lg shadow-nord-8/20 flex items-center justify-center gap-2 transition-all transform active:scale-[0.98]">
                 <i data-lucide="search" class="w-4 h-4"></i>
                 <span>Find & AI-Evaluate Products</span>
               </button>
@@ -385,176 +300,120 @@
                   <i data-lucide="list-filter" class="w-4 h-4 text-nord-8"></i>
                   Products & Evaluation Results
                 </h3>
-                <span id="results-count-label" class="text-xs text-nord-4 opacity-75">Ready to search.</span>
+                <span id="results-count-label" class="text-xs text-nord-4 opacity-70">0 items found</span>
               </div>
 
-              <!-- Filter Buttons -->
-              <div class="flex items-center gap-1.5 self-end sm:self-auto">
-                <button class="filter-tab-btn active px-3 py-1.5 rounded-xl text-xs font-semibold transition" data-filter="all">All (<span id="count-all">0</span>)</button>
-                <button class="filter-tab-btn px-3 py-1.5 rounded-xl text-xs font-semibold text-nord-14 transition" data-filter="matches">Matches (<span id="count-matches">0</span>)</button>
-                <button class="filter-tab-btn px-3 py-1.5 rounded-xl text-xs font-semibold text-nord-4 transition" data-filter="excluded">Excluded (<span id="count-excluded">0</span>)</button>
+              <!-- Filter Tabs: All, Matches, Excluded -->
+              <div class="flex items-center gap-1.5 p-1 bg-nord-0/60 rounded-xl border theme-border text-xs">
+                <button class="filter-tab-btn active px-3 py-1.5 rounded-lg transition" data-filter="all">
+                  All (<span id="count-all">0</span>)
+                </button>
+                <button class="filter-tab-btn px-3 py-1.5 rounded-lg transition text-nord-14 hover:bg-nord-14/10" data-filter="matches">
+                  Matches (<span id="count-matches">0</span>)
+                </button>
+                <button class="filter-tab-btn px-3 py-1.5 rounded-lg transition text-nord-11 hover:bg-nord-11/10" data-filter="excluded">
+                  Excluded (<span id="count-excluded">0</span>)
+                </button>
               </div>
             </div>
 
-            <!-- Empty State -->
-            <div id="results-empty-state" class="py-16 text-center text-nord-3 flex flex-col items-center justify-center">
-              <i data-lucide="package-search" class="w-12 h-12 text-nord-3 mb-3 stroke-1"></i>
-              <p class="text-sm font-semibold text-nord-4">No products to display yet</p>
-              <p class="text-xs text-nord-3 max-w-sm mt-1">Enter search term(s) and criteria on the left, then click search.</p>
+            <!-- Empty State Placeholder -->
+            <div id="results-empty-state" class="py-16 text-center text-nord-3 flex flex-col items-center justify-center gap-3 my-auto">
+              <div class="w-16 h-16 rounded-2xl bg-nord-0/40 border theme-border flex items-center justify-center text-nord-3">
+                <i data-lucide="shopping-bag" class="w-8 h-8"></i>
+              </div>
+              <p class="text-sm font-medium text-nord-4">No products evaluated yet</p>
+              <p class="text-xs max-w-sm text-nord-4 opacity-70">Enter your search term and strict criteria on the left, then click "Find & AI-Evaluate Products".</p>
             </div>
 
-            <!-- Products List -->
-            <div id="products-list" class="divide-y theme-border mt-2 space-y-3 hidden"></div>
-
+            <!-- Product Cards Grid -->
+            <div id="products-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 hidden">
+              <!-- Rendered dynamically -->
+            </div>
           </div>
         </div>
-
       </div>
-    </section>
+    </div>
 
-    <!-- TAB 2: SAVED SEARCHES (HISTORY) -->
-    <section id="history-section" class="tab-content hidden space-y-6">
-      <div class="flex items-center justify-between">
+    <!-- SAVED SEARCHES / HISTORY SECTION (Tab 2) -->
+    <div id="history-section" class="hidden space-y-6">
+      <div class="flex items-center justify-between pb-4 border-b theme-border">
         <div>
-          <h2 class="text-xl font-extrabold text-nord-6 flex items-center gap-2">
-            <i data-lucide="database" class="w-5 h-5 text-nord-8"></i>
-            Saved Searches Database
-          </h2>
-          <p class="text-xs text-nord-4 opacity-80">Browse previous searches, inspect AI evaluations, or remove saved records.</p>
+          <h2 class="text-xl font-extrabold text-nord-6">Saved Search History</h2>
+          <p class="text-xs text-nord-4 opacity-75">All past AI evaluated searches saved in local SQLite storage</p>
         </div>
-        <button id="refresh-history-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl theme-bg-card border theme-border hover:border-nord-8 text-xs text-nord-4 transition">
-          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-          <span>Refresh</span>
-        </button>
       </div>
 
-      <!-- History Grid -->
-      <div id="history-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
-
-      <!-- Empty History State -->
-      <div id="history-empty-state" class="hidden theme-bg-card border theme-border rounded-2xl p-16 text-center">
-        <i data-lucide="folder-search" class="w-12 h-12 text-nord-3 mx-auto mb-3 stroke-1"></i>
-        <h4 class="text-base font-semibold text-nord-4">No Saved Searches</h4>
-        <p class="text-xs text-nord-3 mt-1">Searches you execute will be persistently recorded here.</p>
+      <div id="history-empty-state" class="py-16 text-center text-nord-3 flex flex-col items-center justify-center gap-3">
+        <i data-lucide="inbox" class="w-12 h-12 opacity-50"></i>
+        <p class="text-sm font-medium text-nord-4">No past searches stored yet</p>
       </div>
-    </section>
 
+      <div id="history-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
   </main>
 
-  <!-- MODAL: MANDATORY ENTRANCE GATE & API KEY SETUP -->
-  <div id="api-key-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-lg w-full p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
-      
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-2xl bg-nord-8/20 text-nord-8 flex items-center justify-center border border-nord-8/30">
-            <i data-lucide="key-round" class="w-5 h-5"></i>
+  <!-- MODAL: GEMINI API KEY -->
+  <div id="api-key-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="theme-bg-card border theme-border rounded-3xl max-w-md w-full p-6 shadow-2xl relative">
+      <div class="flex items-center justify-between pb-4 border-b theme-border mb-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-nord-8/15 text-nord-8 flex items-center justify-center">
+            <i data-lucide="key" class="w-4 h-4"></i>
           </div>
-          <div>
-            <h3 class="font-extrabold text-nord-6 text-lg">Gemini API Key Required</h3>
-            <p class="text-xs text-nord-4 opacity-80">Connect your Google Gemini API key to start</p>
-          </div>
+          <h3 class="font-bold text-nord-6 text-base">Gemini API Key</h3>
         </div>
         <button id="close-api-key-modal" class="text-nord-4 hover:text-nord-6 transition">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
 
-      <!-- Step-by-Step Instructions -->
-      <div class="bg-nord-0/60 p-4 rounded-2xl border theme-border text-xs space-y-2 mb-5">
-        <h4 class="font-bold text-nord-5 flex items-center gap-1.5">
-          <i data-lucide="info" class="w-4 h-4 text-nord-8"></i>
-          How to get your free Gemini API Key:
-        </h4>
-        <ol class="list-decimal list-inside space-y-1 text-nord-4 pl-1 leading-relaxed">
-          <li>Visit <a href="https://aistudio.google.com/" target="_blank" class="text-nord-8 underline font-semibold hover:text-nord-7">Google AI Studio (aistudio.google.com)</a></li>
-          <li>Sign in with your standard Google account.</li>
-          <li>Click on <strong>"Get API key"</strong> and then <strong>"Create API key"</strong>.</li>
-          <li>Copy your key and paste it in the box below.</li>
-        </ol>
-      </div>
-
       <form id="api-key-form" class="space-y-4">
         <div>
-          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Paste API Key</label>
-          <input type="password" id="gemini-key-input" placeholder="AIzaSy..." required class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-sm text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
+          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Enter Google AI Studio Key</label>
+          <input type="password" id="gemini-key-input" placeholder="Paste AQ.Ab8... or AI Studio key" class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
         </div>
 
         <div id="key-validation-message" class="text-xs hidden p-3 rounded-xl border"></div>
 
         <div class="flex items-center justify-end gap-2 pt-2">
-          <button type="button" id="cancel-api-key-btn" class="px-4 py-2.5 rounded-xl text-xs font-semibold text-nord-4 hover:text-nord-6 bg-nord-2/60 transition hidden">Cancel</button>
-          <button type="submit" id="save-api-key-btn" class="w-full py-3 rounded-xl text-xs font-bold text-nord-0 bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 transition shadow-lg shadow-nord-8/20">Validate & Unlock App</button>
+          <button type="button" id="cancel-api-key-btn" class="px-4 py-2 rounded-xl text-xs font-semibold text-nord-4 hover:bg-nord-2 transition">
+            Cancel
+          </button>
+          <button type="submit" id="save-api-key-btn" class="px-5 py-2 rounded-xl text-xs font-bold text-nord-0 bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 transition shadow-lg shadow-nord-8/20">
+            Save & Validate
+          </button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- MODAL: SCRAPING GATEWAY SETTINGS MODAL -->
-  <div id="gateway-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
-    <div class="theme-bg-card border border-nord-8/40 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
-      
-      <div class="flex items-center justify-between pb-4 border-b theme-border mb-4">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-2xl bg-nord-8/20 text-nord-8 flex items-center justify-center border border-nord-8/30 flex-shrink-0">
-            <i data-lucide="shield-check" class="w-5 h-5"></i>
-          </div>
-          <div>
-            <h3 class="font-extrabold text-nord-6 text-base">Anti-Bot Scraping Gateway</h3>
-            <p class="text-xs text-nord-4 opacity-80">Bypass AliExpress verification automatically</p>
-          </div>
-        </div>
-        <button id="close-gateway-modal" class="text-nord-4 hover:text-nord-6 transition">
-          <i data-lucide="x" class="w-5 h-5"></i>
+  <!-- MODAL: INTERACTIVE CAPTCHA VERIFICATION -->
+  <div id="captcha-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="theme-bg-card border theme-border rounded-3xl max-w-lg w-full p-6 shadow-2xl relative text-center space-y-4">
+      <div class="w-12 h-12 rounded-2xl bg-nord-13/20 text-nord-13 flex items-center justify-center mx-auto">
+        <i data-lucide="shield-alert" class="w-6 h-6"></i>
+      </div>
+
+      <div>
+        <h3 class="font-bold text-nord-6 text-base">AliExpress Verification Challenge</h3>
+        <p class="text-xs text-nord-4 opacity-80 mt-1">Please complete the slider challenge to proceed.</p>
+      </div>
+
+      <div id="captcha-frame-container" class="bg-nord-0 p-3 rounded-2xl border theme-border min-h-[140px] flex items-center justify-center">
+        <span class="text-xs text-nord-4">Solving automatically or slide when prompted...</span>
+      </div>
+
+      <div class="flex items-center justify-center gap-3 pt-2">
+        <button type="button" id="resume-captcha-btn" class="px-5 py-2 rounded-xl text-xs font-bold text-nord-0 bg-gradient-to-r from-nord-14 to-nord-7 hover:opacity-95 transition shadow-lg">
+          I Have Completed Verification
+        </button>
+        <button type="button" id="skip-captcha-btn" class="px-4 py-2 rounded-xl text-xs font-semibold text-nord-4 hover:bg-nord-2 transition">
+          Skip Term
         </button>
       </div>
-
-      <!-- Quick Guidance -->
-      <div class="bg-nord-0/60 p-4 rounded-2xl border theme-border text-xs space-y-2 mb-4 leading-relaxed">
-        <h4 class="font-bold text-nord-5 flex items-center gap-1.5">
-          <i data-lucide="sparkles" class="w-4 h-4 text-nord-8"></i>
-          Free Gateway API Keys:
-        </h4>
-        <ul class="space-y-1.5 text-nord-4">
-          <li>• <a href="https://www.zenrows.com/" target="_blank" class="text-nord-8 font-bold underline hover:text-nord-7">ZenRows.com</a>: 1,000 free requests (Recommended, zero setup).</li>
-          <li>• <a href="https://scrapfly.io/" target="_blank" class="text-nord-8 font-bold underline hover:text-nord-7">ScrapFly.io</a>: 1,000 free credits with Anti-Scraping Protection.</li>
-          <li>• <a href="https://www.scraperapi.com/" target="_blank" class="text-nord-8 font-bold underline hover:text-nord-7">ScraperAPI.com</a>: 5,000 free API requests.</li>
-        </ul>
-      </div>
-
-      <form id="gateway-form" class="space-y-4">
-        <div>
-          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Scraping Provider</label>
-          <select id="gateway-provider-select" class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-5 font-semibold focus:outline-none focus:border-nord-8">
-            <option value="zenrows" selected>ZenRows (Recommended)</option>
-            <option value="scrapfly">ScrapFly</option>
-            <option value="scraperapi">ScraperAPI</option>
-            <option value="custom">Custom Proxy / Gateway URL</option>
-          </select>
-        </div>
-
-        <div>
-          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Gateway API Key</label>
-          <input type="password" id="gateway-key-input" placeholder="Paste your ZenRows / ScrapFly / ScraperAPI key..." class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
-        </div>
-
-        <div id="custom-gateway-url-group" class="hidden">
-          <label class="block text-xs font-bold text-nord-4 uppercase tracking-wider mb-1.5">Custom Gateway URL</label>
-          <input type="text" id="custom-gateway-url-input" placeholder="https://your-proxy-endpoint.com/api?url={url}" class="w-full theme-bg-input border theme-border rounded-xl px-3.5 py-2.5 text-xs text-nord-6 font-mono placeholder-nord-3 focus:outline-none focus:border-nord-8">
-        </div>
-
-        <div id="gateway-validation-message" class="text-xs hidden p-3 rounded-xl border"></div>
-
-        <div class="flex items-center justify-between gap-3 pt-2">
-          <button type="button" id="test-gateway-btn" class="px-4 py-2.5 rounded-xl text-xs font-semibold text-nord-5 bg-nord-2 hover:bg-nord-3 transition flex items-center gap-1.5">
-            <i data-lucide="activity" class="w-4 h-4 text-nord-8"></i>
-            <span>Test Connection</span>
-          </button>
-          <button type="submit" id="save-gateway-btn" class="px-5 py-2.5 rounded-xl text-xs font-bold text-nord-0 bg-gradient-to-r from-nord-10 to-nord-8 hover:from-nord-9 hover:to-nord-7 transition shadow-lg shadow-nord-8/20">
-            Save Gateway Settings
-          </button>
-        </div>
-      </form>
     </div>
   </div>
 

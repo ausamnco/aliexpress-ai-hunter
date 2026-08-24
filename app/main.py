@@ -10,17 +10,15 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
 
 from app import database
 from app import scraper
 from app import ai_evaluator
-from app.models import SearchRequest, ValidateKeyRequest, ValidateGatewayRequest
+from app.models import SearchRequest, ValidateKeyRequest, CaptchaActionRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("aliexpress_ai_hunter")
 
-# Shared HTTP client for suggestions & background API calls
 http_client: Optional[httpx.AsyncClient] = None
 SUGGESTIONS_CACHE: Dict[str, List[str]] = {}
 
@@ -43,13 +41,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Models for Batch Evaluation from Extension
-class BatchEvaluateRequest(BaseModel):
-    items: List[Dict[str, Any]]
-    conditions: str
-    gemini_api_key: str
-    model_name: Optional[str] = "gemini-3.6-flash"
 
 # API Endpoints
 
@@ -74,22 +65,12 @@ async def get_gemini_models(req: ValidateKeyRequest):
     models = await ai_evaluator.list_available_models(req.api_key.strip())
     return {"models": models}
 
-@app.post("/api/validate-gateway")
-async def validate_scraping_gateway(req: ValidateGatewayRequest):
-    result = await scraper.GatewayScraperClient.validate_gateway(
-        provider=req.provider,
-        api_key=req.api_key,
-        custom_gateway_url=req.custom_gateway_url
-    )
-    return result
-
 @app.get("/api/suggestions")
 async def get_search_suggestions(q: str = Query("", min_length=1)):
     clean_q = q.strip().lower()
     if not clean_q:
         return {"suggestions": []}
     
-    # Check in-memory cache first for instant sub-millisecond response
     if clean_q in SUGGESTIONS_CACHE:
         return {"suggestions": SUGGESTIONS_CACHE[clean_q]}
     
@@ -134,9 +115,6 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks):
         search_terms=terms,
         conditions=req.conditions.strip(),
         gemini_api_key=req.gemini_api_key.strip(),
-        scraping_provider=req.scraping_provider.strip().lower(),
-        scraping_api_key=(req.scraping_api_key or "").strip(),
-        custom_gateway_url=(req.custom_gateway_url or "").strip(),
         max_candidates=req.max_candidates,
         ship_country=req.ship_country.strip().upper(),
         currency=req.currency.strip().upper(),
@@ -159,43 +137,15 @@ async def stop_search(search_id: str):
     await database.update_search_status(search_id, "cancelled", len(session.evaluated_items), sum(1 for i in session.evaluated_items if i.get("is_match")))
     return {"status": "cancelled", "search_id": search_id, "message": "Search cancelled successfully."}
 
-@app.post("/api/evaluate-batch")
-async def evaluate_items_batch(req: BatchEvaluateRequest):
-    """
-    Direct concurrent batch evaluation endpoint for Chrome Extension or API clients.
-    Evaluates up to 60 items in parallel within ~3 seconds!
-    """
-    if not req.items:
-        return {"evaluated_items": []}
-    if not req.conditions.strip():
-        raise HTTPException(status_code=400, detail="Conditions cannot be empty.")
-    if not req.gemini_api_key.strip():
-        raise HTTPException(status_code=400, detail="Gemini API Key is required.")
-
-    async def eval_single(item: Dict[str, Any]):
-        try:
-            ev = await ai_evaluator.evaluate_product(
-                item=item,
-                conditions=req.conditions,
-                api_key=req.gemini_api_key,
-                model_name=req.model_name or "gemini-3.6-flash"
-            )
-            item_copy = dict(item)
-            item_copy["is_match"] = ev.is_match
-            item_copy["confidence"] = ev.confidence
-            item_copy["verdict_reason"] = ev.verdict_reason
-            item_copy["criteria_breakdown"] = [c.model_dump() for c in ev.criteria_evaluations]
-            return item_copy
-        except Exception as e:
-            item_copy = dict(item)
-            item_copy["is_match"] = False
-            item_copy["confidence"] = 0.0
-            item_copy["verdict_reason"] = f"Evaluation failed: {str(e)[:80]}"
-            return item_copy
-
-    results = await asyncio.gather(*(eval_single(it) for it in req.items), return_exceptions=True)
-    clean_results = [r for r in results if isinstance(r, dict)]
-    return {"evaluated_items": clean_results}
+@app.post("/api/captcha/resume")
+async def resume_captcha(req: CaptchaActionRequest):
+    session = scraper.sessions.get(req.search_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Search session not found.")
+    
+    session.resume_action = req.action
+    session.captcha_resume_event.set()
+    return {"status": "ok", "message": "Verification challenge resumed."}
 
 @app.get("/api/search/stream/{search_id}")
 async def stream_search_events(search_id: str):
